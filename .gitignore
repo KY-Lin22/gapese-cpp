@@ -39,6 +39,9 @@ htmlcov/
 # MATLAB temporary files
 *.asv
 *.m~
+tests/**/results/*.mat
+tests/**/results/*.npz
+tests/**/results/*.json
 
 # OS generated files
 .DS_Store
