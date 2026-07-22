@@ -1,0 +1,45 @@
+# Build outputs
+build/
+_dist/
+dist/
+out/
+cmake-build-*/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+Testing/
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+*.whl
+.coverage
+htmlcov/
+
+# Compiled binaries
+*.mex*
+*.pyd
+*.so
+*.dylib
+*.dll
+*.lib
+*.a
+
+# IDE generated files
+.vs/
+
+# MATLAB temporary files
+*.asv
+*.m~
+
+# OS generated files
+.DS_Store
+Thumbs.db
