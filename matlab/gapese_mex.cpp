@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -172,27 +173,65 @@ ProblemSize problem_from_mx(const mxArray* structure) {
 }
 
 Options options_from_mx(const mxArray* structure) {
+    if (!mxIsStruct(structure) || mxGetNumberOfElements(structure) != 1) {
+        throw std::invalid_argument("options must be a scalar MATLAB struct");
+    }
+
+    static const std::unordered_set<std::string> canonical_names = {
+        "print_level",
+        "dgap_a",
+        "dgap_b",
+        "fb_sigma",
+        "max_iter",
+        "tol_kkt",
+        "tol_dgap",
+        "newton_step_max",
+        "mu_min",
+        "mu_max",
+        "mu_update",
+        "nu_x",
+        "nu_xi",
+        "nu_b",
+        "nu_d",
+        "beta_init",
+        "rho",
+        "alpha_min",
+        "nu_alpha",
+        "nu_D"};
+
+    const int field_count = mxGetNumberOfFields(structure);
+    for (int i = 0; i < field_count; ++i) {
+        const char* name = mxGetFieldNameByNumber(structure, i);
+        if (name == nullptr || canonical_names.find(name) == canonical_names.end()) {
+            throw std::invalid_argument(
+                std::string("unknown Gapese option: ") + (name == nullptr ? "<unnamed>" : name));
+        }
+    }
+
     Options options;
-    options.print_level = integer_field(structure, "print_level");
-    options.dgap_a = scalar_field(structure, "D_gap_param_a");
-    options.dgap_b = scalar_field(structure, "D_gap_param_b");
-    options.fb_sigma = scalar_field(structure, "FB_sigma");
-    options.max_iter = integer_field(structure, "max_iter");
-    options.tol_kkt = scalar_field(structure, "tol_KKT_res");
-    options.tol_dgap = scalar_field(structure, "tol_D_gap_res");
-    options.newton_step_max = scalar_field(structure, "Newton_step_norm");
-    options.mu_max = scalar_field(structure, "mu_max");
-    options.mu_min = scalar_field(structure, "mu_min");
-    options.mu_update = scalar_field(structure, "mu_update");
-    options.nu_x = scalar_field(structure, "nu_x");
-    options.nu_xi = scalar_field(structure, "nu_xi");
-    options.nu_b = scalar_field(structure, "nu_b");
-    options.nu_d = scalar_field(structure, "nu_d");
-    options.beta_init = scalar_field(structure, "beta_init");
-    options.rho = scalar_field(structure, "rho");
-    options.alpha_min = scalar_field(structure, "alpha_min");
-    options.nu_alpha = scalar_field(structure, "nu_alpha");
-    options.nu_D = scalar_field(structure, "nu_D");
+    if (field(structure, "print_level", false)) options.print_level = integer_field(structure, "print_level");
+    if (field(structure, "dgap_a", false)) options.dgap_a = scalar_field(structure, "dgap_a");
+    if (field(structure, "dgap_b", false)) options.dgap_b = scalar_field(structure, "dgap_b");
+    if (field(structure, "fb_sigma", false)) options.fb_sigma = scalar_field(structure, "fb_sigma");
+    if (field(structure, "max_iter", false)) options.max_iter = integer_field(structure, "max_iter");
+    if (field(structure, "tol_kkt", false)) options.tol_kkt = scalar_field(structure, "tol_kkt");
+    if (field(structure, "tol_dgap", false)) options.tol_dgap = scalar_field(structure, "tol_dgap");
+    if (field(structure, "newton_step_max", false)) {
+        options.newton_step_max = scalar_field(structure, "newton_step_max");
+    }
+    if (field(structure, "mu_min", false)) options.mu_min = scalar_field(structure, "mu_min");
+    if (field(structure, "mu_max", false)) options.mu_max = scalar_field(structure, "mu_max");
+    if (field(structure, "mu_update", false)) options.mu_update = scalar_field(structure, "mu_update");
+    if (field(structure, "nu_x", false)) options.nu_x = scalar_field(structure, "nu_x");
+    if (field(structure, "nu_xi", false)) options.nu_xi = scalar_field(structure, "nu_xi");
+    if (field(structure, "nu_b", false)) options.nu_b = scalar_field(structure, "nu_b");
+    if (field(structure, "nu_d", false)) options.nu_d = scalar_field(structure, "nu_d");
+    if (field(structure, "beta_init", false)) options.beta_init = scalar_field(structure, "beta_init");
+    if (field(structure, "rho", false)) options.rho = scalar_field(structure, "rho");
+    if (field(structure, "alpha_min", false)) options.alpha_min = scalar_field(structure, "alpha_min");
+    if (field(structure, "nu_alpha", false)) options.nu_alpha = scalar_field(structure, "nu_alpha");
+    if (field(structure, "nu_D", false)) options.nu_D = scalar_field(structure, "nu_D");
+    options.validate();
     return options;
 }
 

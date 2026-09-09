@@ -9,6 +9,17 @@ root_dir = fileparts(this_dir);
 
 if nargin < 1 || isempty(eigen_dir)
     eigen_dir = getenv('EIGEN3_INCLUDE_DIR');
+else
+    if isstring(eigen_dir)
+        if ~isscalar(eigen_dir)
+            error('GapeseMex:InvalidEigenPath', ...
+                'EIGEN_DIR must be a scalar string or character vector.');
+        end
+        eigen_dir = char(eigen_dir);
+    elseif ~ischar(eigen_dir)
+        error('GapeseMex:InvalidEigenPath', ...
+            'EIGEN_DIR must be a scalar string or character vector.');
+    end
 end
 if isempty(eigen_dir)
     candidate = fullfile(root_dir, 'third_party', 'eigen');
