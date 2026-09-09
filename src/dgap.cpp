@@ -1,11 +1,11 @@
-#include "gapese/dgap.hpp"
+#include "gapese/detail/dgap.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
 
-namespace gapese {
+namespace gapese::detail {
 
 DGapEvaluator::DGapEvaluator(double a, double b)
     : a_(a),
@@ -106,4 +106,4 @@ SparseMatrix DGapEvaluator::modified_hessian(const Vector& xi) const {
     return hessian;
 }
 
-}  // namespace gapese
+}  // namespace gapese::detail

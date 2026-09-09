@@ -1,8 +1,8 @@
 #pragma once
 
-#include "gapese/types.hpp"
+#include "gapese/detail/types.hpp"
 
-namespace gapese {
+namespace gapese::detail {
 
 double qp_objective(
     const Vector& x,
@@ -18,4 +18,4 @@ double qp_directional_derivative(
     const CcqpData& data,
     const TransformedData& transformed);
 
-}  // namespace gapese
+}  // namespace gapese::detail

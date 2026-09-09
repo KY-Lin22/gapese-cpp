@@ -1,10 +1,10 @@
-#include "gapese/fb.hpp"
+#include "gapese/detail/fb.hpp"
 
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 
-namespace gapese {
+namespace gapese::detail {
 
 Vector FBEvaluator::value(const Vector& v, const Vector& gamma) const {
     if (v.size() != gamma.size()) {
@@ -42,4 +42,4 @@ std::pair<Vector, Vector> FBEvaluator::jacobian_diagonals(const Vector& v, const
     return {d_v, d_gamma};
 }
 
-}  // namespace gapese
+}  // namespace gapese::detail

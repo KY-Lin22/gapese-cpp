@@ -18,9 +18,6 @@ struct ProblemSize {
     int n_b = 0;
     int n_d = 0;
 
-    int n_xi() const noexcept { return 2 * n_lambda; }
-    int kkt_dim() const noexcept { return n_x + 2 * n_lambda + n_d + n_b + n_d; }
-
     void validate() const;
 };
 
@@ -84,13 +81,6 @@ struct Info {
 struct SolveResult {
     Solution solution;
     Info info;
-};
-
-struct TransformedData {
-    SparseMatrix Q_xi;
-    Vector r_xi;
-    SparseMatrix A_xi;
-    SparseMatrix C_xi;
 };
 
 }  // namespace gapese

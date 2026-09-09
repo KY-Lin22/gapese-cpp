@@ -1,9 +1,9 @@
-#include "gapese/kkt.hpp"
+#include "gapese/detail/kkt.hpp"
 
 #include <stdexcept>
 #include <vector>
 
-namespace gapese {
+namespace gapese::detail {
 namespace {
 
 void add_sparse_block(
@@ -83,11 +83,11 @@ Vector KKTAssembler::residual(
     const CcqpData& data,
     const TransformedData& transformed) const {
     const int nx = problem_.n_x;
-    const int nxi = problem_.n_xi();
+    const int nxi = transformed_dim(problem_);
     const int nb = problem_.n_b;
     const int nd = problem_.n_d;
 
-    Vector result(problem_.kkt_dim());
+    Vector result(kkt_dim(problem_));
     int offset = 0;
 
     result.segment(offset, nx) =
@@ -117,10 +117,10 @@ SparseMatrix KKTAssembler::matrix(
     const CcqpData& data,
     const TransformedData& transformed) const {
     const int nx = problem_.n_x;
-    const int nxi = problem_.n_xi();
+    const int nxi = transformed_dim(problem_);
     const int nb = problem_.n_b;
     const int nd = problem_.n_d;
-    const int dim = problem_.kkt_dim();
+    const int dim = kkt_dim(problem_);
 
     const int col_x = 0;
     const int col_xi = col_x + nx;
@@ -191,4 +191,4 @@ Vector KKTAssembler::violation(
     return result;
 }
 
-}  // namespace gapese
+}  // namespace gapese::detail

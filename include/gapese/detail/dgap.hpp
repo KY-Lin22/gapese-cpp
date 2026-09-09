@@ -2,7 +2,7 @@
 
 #include "gapese/types.hpp"
 
-namespace gapese {
+namespace gapese::detail {
 
 class DGapEvaluator {
 public:
@@ -22,4 +22,4 @@ private:
     double kappa_min_;
 };
 
-}  // namespace gapese
+}  // namespace gapese::detail

@@ -1,8 +1,9 @@
 #pragma once
 
-#include "gapese/dgap.hpp"
-#include "gapese/fb.hpp"
-#include "gapese/kkt.hpp"
+#include "gapese/detail/dgap.hpp"
+#include "gapese/detail/fb.hpp"
+#include "gapese/detail/kkt.hpp"
+#include "gapese/detail/types.hpp"
 #include "gapese/options.hpp"
 #include "gapese/types.hpp"
 
@@ -20,13 +21,13 @@ public:
 private:
     ProblemSize problem_;
     Options options_;
-    DGapEvaluator dgap_;
-    FBEvaluator fb_;
-    KKTAssembler kkt_;
+    detail::DGapEvaluator dgap_;
+    detail::FBEvaluator fb_;
+    detail::KKTAssembler kkt_;
 
     void validate_data(const CcqpData& data) const;
     void validate_initial(const InitialGuess& initial) const;
-    TransformedData transform_data(const CcqpData& data) const;
+    detail::TransformedData transform_data(const CcqpData& data) const;
     Vector interleave(const Vector& lambda, const Vector& eta) const;
     void deinterleave(const Vector& xi, Vector& lambda, Vector& eta) const;
 };

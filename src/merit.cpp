@@ -1,6 +1,6 @@
-#include "gapese/merit.hpp"
+#include "gapese/detail/merit.hpp"
 
-namespace gapese {
+namespace gapese::detail {
 
 double qp_objective(
     const Vector& x,
@@ -22,4 +22,4 @@ double qp_directional_derivative(
            (transformed.Q_xi * xi + transformed.r_xi).dot(dxi);
 }
 
-}  // namespace gapese
+}  // namespace gapese::detail

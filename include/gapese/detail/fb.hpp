@@ -4,7 +4,7 @@
 
 #include <utility>
 
-namespace gapese {
+namespace gapese::detail {
 
 class FBEvaluator {
 public:
@@ -19,4 +19,4 @@ private:
     double sigma_;
 };
 
-}  // namespace gapese
+}  // namespace gapese::detail

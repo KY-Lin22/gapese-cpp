@@ -1,6 +1,6 @@
 #include "gapese/solver.hpp"
 
-#include "gapese/merit.hpp"
+#include "gapese/detail/merit.hpp"
 
 #include <Eigen/SparseLU>
 #include <Eigen/SparseQR>
@@ -114,7 +114,7 @@ void Solver::validate_initial(const InitialGuess& initial) const {
 }
 
 Vector Solver::interleave(const Vector& lambda, const Vector& eta) const {
-    Vector xi(problem_.n_xi());
+    Vector xi(detail::transformed_dim(problem_));
     for (int i = 0; i < problem_.n_lambda; ++i) {
         xi[2 * i] = lambda[i];
         xi[2 * i + 1] = eta[i];
@@ -131,11 +131,11 @@ void Solver::deinterleave(const Vector& xi, Vector& lambda, Vector& eta) const {
     }
 }
 
-TransformedData Solver::transform_data(const CcqpData& data) const {
+detail::TransformedData Solver::transform_data(const CcqpData& data) const {
     const int nl = problem_.n_lambda;
-    const int nxi = problem_.n_xi();
+    const int nxi = detail::transformed_dim(problem_);
 
-    TransformedData transformed;
+    detail::TransformedData transformed;
 
     std::vector<Triplet> q_triplets;
     q_triplets.reserve(static_cast<std::size_t>(data.Q_lambda.nonZeros() + data.Q_eta.nonZeros()));
@@ -198,7 +198,7 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
     const auto total_start = Clock::now();
     validate_data(data);
     validate_initial(initial);
-    const TransformedData transformed = transform_data(data);
+    const detail::TransformedData transformed = transform_data(data);
 
     Vector x = initial.x;
     Vector xi = interleave(initial.lambda, initial.eta);
@@ -224,7 +224,7 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
         iteration = k;
 
         const auto termination_start = Clock::now();
-        objective = qp_objective(x, xi, data, transformed);
+        objective = detail::qp_objective(x, xi, data, transformed);
         dgap_residual = dgap_.value(xi);
         const Vector kkt_residual = kkt_.residual(mu, x, xi, v_d, gamma_b, gamma_d, data, transformed);
         kkt_norm = kkt_residual.lpNorm<Eigen::Infinity>();
@@ -295,8 +295,8 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
         int offset = 0;
         const Vector dx = newton_step.segment(offset, problem_.n_x);
         offset += problem_.n_x;
-        const Vector dxi = newton_step.segment(offset, problem_.n_xi());
-        offset += problem_.n_xi();
+        const Vector dxi = newton_step.segment(offset, detail::transformed_dim(problem_));
+        offset += detail::transformed_dim(problem_);
         const Vector dv_d = newton_step.segment(offset, problem_.n_d);
         offset += problem_.n_d;
         const Vector dgamma_b = newton_step.segment(offset, problem_.n_b);
@@ -305,7 +305,7 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
         timing.search_direction += elapsed_seconds(search_start);
 
         const auto line_search_start = Clock::now();
-        const double d_objective = qp_directional_derivative(x, xi, dx, dxi, data, transformed);
+        const double d_objective = detail::qp_directional_derivative(x, xi, dx, dxi, data, transformed);
         const double d_dgap = dgap_.gradient(xi).dot(dxi);
         const int violation_size = problem_.n_b + 2 * problem_.n_d;
         const double violation_norm = violation_size > 0
@@ -337,7 +337,7 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
             v_d_trial = v_d + alpha * dv_d;
             gamma_d_trial = gamma_d + alpha * dgamma_d;
 
-            const double objective_trial = qp_objective(x_trial, xi_trial, data, transformed);
+            const double objective_trial = detail::qp_objective(x_trial, xi_trial, data, transformed);
             const double dgap_trial = dgap_.value(xi_trial);
             const Vector violation_trial =
                 kkt_.violation(x_trial, xi_trial, v_d_trial, gamma_d_trial, data, transformed);

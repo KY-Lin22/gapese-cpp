@@ -1,11 +1,11 @@
 #pragma once
 
-#include "gapese/dgap.hpp"
-#include "gapese/fb.hpp"
+#include "gapese/detail/dgap.hpp"
+#include "gapese/detail/fb.hpp"
 #include "gapese/options.hpp"
-#include "gapese/types.hpp"
+#include "gapese/detail/types.hpp"
 
-namespace gapese {
+namespace gapese::detail {
 
 class KKTAssembler {
 public:
@@ -44,4 +44,4 @@ private:
     const FBEvaluator& fb_;
 };
 
-}  // namespace gapese
+}  // namespace gapese::detail
