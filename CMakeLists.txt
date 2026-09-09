@@ -76,9 +76,14 @@ endif()
 
 if(GAPESE_BUILD_TESTS)
     enable_testing()
+
     add_executable(test_gapese_simple tests/cpp/test_simple.cpp)
     target_link_libraries(test_gapese_simple PRIVATE gapese_core)
     add_test(NAME gapese_simple COMMAND test_gapese_simple)
+
+    add_executable(test_gapese_options tests/cpp/test_options.cpp)
+    target_link_libraries(test_gapese_options PRIVATE gapese_core)
+    add_test(NAME gapese_options COMMAND test_gapese_options)
 endif()
 
 install(TARGETS gapese_core
