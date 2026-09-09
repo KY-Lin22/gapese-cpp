@@ -38,8 +38,7 @@ add_library(gapese_core STATIC
     src/fb.cpp
     src/kkt.cpp
     src/merit.cpp
-    src/solver.cpp
-    src/c_api.cpp)
+    src/solver.cpp)
 add_library(gapese::core ALIAS gapese_core)
 
 target_include_directories(gapese_core
