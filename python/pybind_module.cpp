@@ -4,8 +4,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <array>
 #include <cstring>
-#include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -22,11 +22,51 @@ const py::handle dict_value(const py::dict& dictionary, const char* key) {
     return dictionary[key];
 }
 
-template <typename T>
-T get_alias(const py::dict& dictionary, std::initializer_list<const char*> keys, T default_value) {
-    for (const char* key : keys) {
-        if (dictionary.contains(key)) return py::cast<T>(dictionary[key]);
+constexpr std::array<const char*, 20> kOptionNames = {
+    "print_level",
+    "dgap_a",
+    "dgap_b",
+    "fb_sigma",
+    "max_iter",
+    "tol_kkt",
+    "tol_dgap",
+    "newton_step_max",
+    "mu_min",
+    "mu_max",
+    "mu_update",
+    "nu_x",
+    "nu_xi",
+    "nu_b",
+    "nu_d",
+    "beta_init",
+    "rho",
+    "alpha_min",
+    "nu_alpha",
+    "nu_D",
+};
+
+bool is_known_option(const std::string& key) {
+    for (const char* known_key : kOptionNames) {
+        if (key == known_key) return true;
     }
+    return false;
+}
+
+void validate_option_keys(const py::dict& dictionary) {
+    for (const auto& item : dictionary) {
+        if (!py::isinstance<py::str>(item.first)) {
+            throw std::invalid_argument("Gapese option names must be strings");
+        }
+        const std::string key = py::cast<std::string>(item.first);
+        if (!is_known_option(key)) {
+            throw std::invalid_argument("unknown Gapese option: " + key);
+        }
+    }
+}
+
+template <typename T>
+T get_option(const py::dict& dictionary, const char* key, T default_value) {
+    if (dictionary.contains(key)) return py::cast<T>(dictionary[key]);
     return default_value;
 }
 
@@ -134,27 +174,29 @@ gapese::ProblemSize problem_from_dict(const py::dict& dictionary) {
 }
 
 gapese::Options options_from_dict(const py::dict& dictionary) {
+    validate_option_keys(dictionary);
+
     gapese::Options options;
-    options.print_level = get_alias<int>(dictionary, {"print_level"}, options.print_level);
-    options.dgap_a = get_alias<double>(dictionary, {"dgap_a", "D_gap_param_a"}, options.dgap_a);
-    options.dgap_b = get_alias<double>(dictionary, {"dgap_b", "D_gap_param_b"}, options.dgap_b);
-    options.fb_sigma = get_alias<double>(dictionary, {"fb_sigma", "FB_sigma"}, options.fb_sigma);
-    options.max_iter = get_alias<int>(dictionary, {"max_iter"}, options.max_iter);
-    options.tol_kkt = get_alias<double>(dictionary, {"tol_kkt", "tol_KKT_res"}, options.tol_kkt);
-    options.tol_dgap = get_alias<double>(dictionary, {"tol_dgap", "tol_D_gap_res"}, options.tol_dgap);
-    options.newton_step_max = get_alias<double>(dictionary, {"newton_step_max", "Newton_step_norm"}, options.newton_step_max);
-    options.mu_min = get_alias<double>(dictionary, {"mu_min"}, options.mu_min);
-    options.mu_max = get_alias<double>(dictionary, {"mu_max"}, options.mu_max);
-    options.mu_update = get_alias<double>(dictionary, {"mu_update"}, options.mu_update);
-    options.nu_x = get_alias<double>(dictionary, {"nu_x"}, options.nu_x);
-    options.nu_xi = get_alias<double>(dictionary, {"nu_xi"}, options.nu_xi);
-    options.nu_b = get_alias<double>(dictionary, {"nu_b"}, options.nu_b);
-    options.nu_d = get_alias<double>(dictionary, {"nu_d"}, options.nu_d);
-    options.beta_init = get_alias<double>(dictionary, {"beta_init"}, options.beta_init);
-    options.rho = get_alias<double>(dictionary, {"rho"}, options.rho);
-    options.alpha_min = get_alias<double>(dictionary, {"alpha_min"}, options.alpha_min);
-    options.nu_alpha = get_alias<double>(dictionary, {"nu_alpha"}, options.nu_alpha);
-    options.nu_D = get_alias<double>(dictionary, {"nu_D"}, options.nu_D);
+    options.print_level = get_option<int>(dictionary, "print_level", options.print_level);
+    options.dgap_a = get_option<double>(dictionary, "dgap_a", options.dgap_a);
+    options.dgap_b = get_option<double>(dictionary, "dgap_b", options.dgap_b);
+    options.fb_sigma = get_option<double>(dictionary, "fb_sigma", options.fb_sigma);
+    options.max_iter = get_option<int>(dictionary, "max_iter", options.max_iter);
+    options.tol_kkt = get_option<double>(dictionary, "tol_kkt", options.tol_kkt);
+    options.tol_dgap = get_option<double>(dictionary, "tol_dgap", options.tol_dgap);
+    options.newton_step_max = get_option<double>(dictionary, "newton_step_max", options.newton_step_max);
+    options.mu_min = get_option<double>(dictionary, "mu_min", options.mu_min);
+    options.mu_max = get_option<double>(dictionary, "mu_max", options.mu_max);
+    options.mu_update = get_option<double>(dictionary, "mu_update", options.mu_update);
+    options.nu_x = get_option<double>(dictionary, "nu_x", options.nu_x);
+    options.nu_xi = get_option<double>(dictionary, "nu_xi", options.nu_xi);
+    options.nu_b = get_option<double>(dictionary, "nu_b", options.nu_b);
+    options.nu_d = get_option<double>(dictionary, "nu_d", options.nu_d);
+    options.beta_init = get_option<double>(dictionary, "beta_init", options.beta_init);
+    options.rho = get_option<double>(dictionary, "rho", options.rho);
+    options.alpha_min = get_option<double>(dictionary, "alpha_min", options.alpha_min);
+    options.nu_alpha = get_option<double>(dictionary, "nu_alpha", options.nu_alpha);
+    options.nu_D = get_option<double>(dictionary, "nu_D", options.nu_D);
     return options;
 }
 

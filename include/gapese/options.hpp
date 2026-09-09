@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -33,11 +34,36 @@ struct Options {
     double nu_D = 1e-4;
 
     void validate() const {
+        const auto require_finite = [](double value, const char* name) {
+            if (!std::isfinite(value)) {
+                throw std::invalid_argument(std::string(name) + " must be finite");
+            }
+        };
+
+        require_finite(dgap_a, "dgap_a");
+        require_finite(dgap_b, "dgap_b");
+        require_finite(fb_sigma, "fb_sigma");
+        require_finite(tol_kkt, "tol_kkt");
+        require_finite(tol_dgap, "tol_dgap");
+        require_finite(newton_step_max, "newton_step_max");
+        require_finite(mu_min, "mu_min");
+        require_finite(mu_max, "mu_max");
+        require_finite(mu_update, "mu_update");
+        require_finite(nu_x, "nu_x");
+        require_finite(nu_xi, "nu_xi");
+        require_finite(nu_b, "nu_b");
+        require_finite(nu_d, "nu_d");
+        require_finite(beta_init, "beta_init");
+        require_finite(rho, "rho");
+        require_finite(alpha_min, "alpha_min");
+        require_finite(nu_alpha, "nu_alpha");
+        require_finite(nu_D, "nu_D");
+
         if (print_level < 0 || print_level > 2) {
             throw std::invalid_argument("print_level must be 0, 1, or 2");
         }
         if (!(dgap_b > dgap_a && dgap_a > 0.0)) {
-            throw std::invalid_argument("D-gap parameters must satisfy b > a > 0");
+            throw std::invalid_argument("D-gap parameters must satisfy dgap_b > dgap_a > 0");
         }
         if (fb_sigma < 0.0) {
             throw std::invalid_argument("fb_sigma must be nonnegative");
@@ -46,7 +72,7 @@ struct Options {
             throw std::invalid_argument("max_iter must be positive");
         }
         if (tol_kkt <= 0.0 || tol_dgap <= 0.0 || newton_step_max <= 0.0) {
-            throw std::invalid_argument("tolerances and newton_step_max must be positive");
+            throw std::invalid_argument("tol_kkt, tol_dgap, and newton_step_max must be positive");
         }
         if (!(mu_max >= mu_min && mu_min > 0.0)) {
             throw std::invalid_argument("mu_max and mu_min must satisfy mu_max >= mu_min > 0");
