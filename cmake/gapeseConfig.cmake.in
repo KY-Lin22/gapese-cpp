@@ -1,0 +1,24 @@
+@PACKAGE_INIT@
+
+# Gapese's public headers expose Eigen types. Reuse an existing Eigen target,
+# accept the same header-only override as the source build, or locate a normal
+# Eigen3 CMake package.
+if(NOT TARGET Eigen3::Eigen)
+    if(EIGEN3_INCLUDE_DIR)
+        if(NOT EXISTS "${EIGEN3_INCLUDE_DIR}/Eigen/Core")
+            set(gapese_FOUND FALSE)
+            set(gapese_NOT_FOUND_MESSAGE
+                "EIGEN3_INCLUDE_DIR='${EIGEN3_INCLUDE_DIR}' does not contain Eigen/Core.")
+            return()
+        endif()
+        add_library(Eigen3::Eigen INTERFACE IMPORTED)
+        set_target_properties(Eigen3::Eigen PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}")
+    else()
+        include(CMakeFindDependencyMacro)
+        find_dependency(Eigen3 3.4 CONFIG)
+    endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/gapeseTargets.cmake")
+check_required_components(gapese)

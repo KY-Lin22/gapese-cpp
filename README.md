@@ -82,22 +82,36 @@ For an offline build with a local Eigen installation, pass the corresponding CMa
 
 ### C++
 
-A C++-only build can be configured with:
+A direct CMake build creates only the C++ core by default. The Python module, tests, and examples are optional targets controlled by `GAPESE_BUILD_PYTHON`, `GAPESE_BUILD_TESTS`, and `GAPESE_BUILD_EXAMPLES`. Install/package rules are enabled by default for a top-level Gapese build and disabled when Gapese is included as a subdirectory; `GAPESE_INSTALL` can override that behavior.
+
+Configure a release build with the C++ tests and example enabled:
 
 ```bash
-cmake -S . -B build \
-  -DGAPESE_BUILD_PYTHON=OFF \
-  -DGAPESE_BUILD_TESTS=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGAPESE_BUILD_PYTHON=OFF -DGAPESE_BUILD_TESTS=ON -DGAPESE_BUILD_EXAMPLES=ON
 cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+cmake -E chdir build ctest -C Release --output-on-failure
 ```
 
-If Eigen is not installed as a CMake package and dependency fetching is disabled, add:
+If Eigen is not installed as a CMake package and dependency fetching is disabled, also pass:
 
 ```bash
--DEIGEN3_INCLUDE_DIR=/path/to/eigen-3.4.0 \
--DGAPESE_FETCH_DEPENDENCIES=OFF
+-DEIGEN3_INCLUDE_DIR=/path/to/eigen-3.4.0 -DGAPESE_FETCH_DEPENDENCIES=OFF
 ```
+
+Install the C++ library to a prefix of your choice:
+
+```bash
+cmake --install build --config Release --prefix /path/to/gapese-install
+```
+
+A downstream CMake project can then use the installed package as follows:
+
+```cmake
+find_package(gapese CONFIG REQUIRED)
+target_link_libraries(my_program PRIVATE gapese::gapese)
+```
+
+Make the Gapese install prefix discoverable through `CMAKE_PREFIX_PATH` (or `gapese_DIR`). If Eigen is available only as a header tree rather than an installed CMake package, also provide `EIGEN3_INCLUDE_DIR` when configuring the downstream project.
 
 ### MATLAB MEX
 
@@ -345,10 +359,12 @@ run("examples/matlab/simple_ccqp.m")
 ### C++
 
 ```bash
-cmake -S . -B build -DGAPESE_BUILD_TESTS=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGAPESE_BUILD_PYTHON=OFF -DGAPESE_BUILD_TESTS=ON -DGAPESE_BUILD_EXAMPLES=ON
 cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+cmake -E chdir build ctest -C Release --output-on-failure
 ```
+
+With `GAPESE_BUILD_EXAMPLES=ON`, the same build also compiles `gapese_example_simple` from `examples/cpp/simple_ccqp.cpp`.
 
 ### Python
 
