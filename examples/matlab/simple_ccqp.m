@@ -57,3 +57,7 @@ fprintf('lambda: %g\n', Sol.lambda);
 fprintf('eta: %g\n', Sol.eta);
 fprintf('KKT residual: %.6e\n', Info.KKT_res);
 fprintf('D-gap residual: %.6e\n', Info.D_gap_res);
+
+% Destroy the solver before restoring the temporary MATLAB path.
+clear solver;
+clear path_cleanup;

@@ -111,5 +111,8 @@ for i = 1:numel(invalid_names)
     assert(rejected, 'Invalid option name was accepted: %s', invalid_names{i});
 end
 
+% Destroy the solver while the MATLAB wrapper is still on the path.
+clear solver;
+
 fprintf('All simple MATLAB MEX tests passed.\n');
 end
