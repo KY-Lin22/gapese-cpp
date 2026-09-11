@@ -1,7 +1,7 @@
 [build-system]
 requires = [
   "scikit-build-core>=0.8",
-  "pybind11>=2.12"
+  "pybind11>=2.13"
 ]
 build-backend = "scikit_build_core.build"
 
@@ -10,6 +10,7 @@ name = "gapese"
 version = "0.1.0"
 description = "C++/Eigen implementation of the Gapese solver for CCQP"
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.9"
 dependencies = ["numpy>=1.21"]
 
@@ -21,3 +22,4 @@ test = ["pytest>=7", "scipy>=1.8"]
 cmake.build-type = "Release"
 cmake.args = ["-DGAPESE_BUILD_TESTS=OFF", "-DGAPESE_BUILD_PYTHON=ON"]
 wheel.packages = []
+install.components = ["Python"]

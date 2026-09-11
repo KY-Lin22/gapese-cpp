@@ -89,25 +89,27 @@ endif()
 
 if(GAPESE_BUILD_PYTHON)
     if(NOT TARGET pybind11::module)
-        find_package(pybind11 2.12 CONFIG QUIET)
+        find_package(pybind11 2.13 CONFIG QUIET)
     endif()
     if(NOT TARGET pybind11::module)
         if(GAPESE_FETCH_DEPENDENCIES)
-            message(STATUS "pybind11 not found; fetching pybind11 2.12.0")
+            message(STATUS "pybind11 not found; fetching pybind11 2.13.6")
             FetchContent_Declare(
                 pybind11
-                URL https://github.com/pybind/pybind11/archive/refs/tags/v2.12.0.tar.gz)
+                URL https://github.com/pybind/pybind11/archive/refs/tags/v2.13.6.tar.gz)
             FetchContent_MakeAvailable(pybind11)
         else()
             message(FATAL_ERROR
-                "pybind11 2.12 or newer was not found. Install pybind11 or enable GAPESE_FETCH_DEPENDENCIES.")
+                "pybind11 2.13 or newer was not found. Install pybind11 or enable GAPESE_FETCH_DEPENDENCIES.")
         endif()
     endif()
 
     pybind11_add_module(gapese python/pybind_module.cpp)
     target_link_libraries(gapese PRIVATE gapese::gapese)
     if(GAPESE_INSTALL)
-        install(TARGETS gapese LIBRARY DESTINATION . RUNTIME DESTINATION .)
+        install(TARGETS gapese
+            LIBRARY DESTINATION . COMPONENT Python
+            RUNTIME DESTINATION . COMPONENT Python)
     endif()
 endif()
 
@@ -133,10 +135,15 @@ if(GAPESE_INSTALL)
 
     install(TARGETS gapese_core
         EXPORT gapeseTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Development
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Development
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Development)
+    install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        COMPONENT Development)
+    install(FILES LICENSE
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/gapese"
+        COMPONENT Development)
 
     configure_package_config_file(
         cmake/gapeseConfig.cmake.in
@@ -150,9 +157,11 @@ if(GAPESE_INSTALL)
     install(EXPORT gapeseTargets
         FILE gapeseTargets.cmake
         NAMESPACE gapese::
-        DESTINATION "${GAPESE_CMAKE_INSTALL_DIR}")
+        DESTINATION "${GAPESE_CMAKE_INSTALL_DIR}"
+        COMPONENT Development)
     install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/gapeseConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/gapeseConfigVersion.cmake"
-        DESTINATION "${GAPESE_CMAKE_INSTALL_DIR}")
+        DESTINATION "${GAPESE_CMAKE_INSTALL_DIR}"
+        COMPONENT Development)
 endif()

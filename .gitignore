@@ -1,5 +1,10 @@
 # Build outputs
-build/
+/build/
+/build_*/
+/build-*/
+/install/
+/install_*/
+/install-*/
 _dist/
 dist/
 out/
@@ -14,7 +19,9 @@ CTestTestfile.cmake
 Testing/
 
 # Python environments and caches
-.venv/
+/.venv/
+/.venv_*/
+/.venv-*/
 venv/
 __pycache__/
 .pytest_cache/

@@ -391,3 +391,7 @@ The numerical method is documented in [`docs/algorithm.md`](docs/algorithm.md). 
 4. solves the penalized KKT system with a semismooth Newton step;
 5. globalizes the iteration with an $\ell_1$ merit-function line search; and
 6. declares success only when both the KKT and D-gap residual tolerances are satisfied.
+
+## License
+
+Gapese is released under the BSD 3-Clause License. See [`LICENSE`](LICENSE) for details.
