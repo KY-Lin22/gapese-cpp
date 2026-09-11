@@ -9,9 +9,9 @@ Gapese considers
 $$
 \begin{aligned}
 \min_{x,\lambda,\eta}\quad
-& \frac{1}{2}x^\top Q_x x + r_x^\top x
-+ \frac{1}{2}\lambda^\top Q_\lambda \lambda + r_\lambda^\top \lambda
-+ \frac{1}{2}\eta^\top Q_\eta \eta + r_\eta^\top \eta \\
+& \frac{1}{2}x^\top Q_x x + r_x^\top x \\
+&\quad + \frac{1}{2}\lambda^\top Q_\lambda \lambda + r_\lambda^\top \lambda \\
+&\quad + \frac{1}{2}\eta^\top Q_\eta \eta + r_\eta^\top \eta \\
 \text{s.t.}\quad
 & A_x x + A_\lambda \lambda + A_\eta \eta - b = 0, \\
 & C_x x + C_\lambda \lambda + C_\eta \eta - d \ge 0, \\
