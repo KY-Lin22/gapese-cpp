@@ -1,417 +1,444 @@
 # Gapese algorithm
 
-This document summarizes the numerical method implemented by Gapese for complementarity-constrained quadratic programming (CCQP). The presentation follows the current solver formulation and uses the same notation as the public problem data.
+Gapese solves complementarity-constrained quadratic programs (CCQPs) using a gap penalty reformulation and a semismooth Newton method. This document summarizes the algorithm implemented in Gapese.
 
 ## 1. CCQP formulation
 
-Gapese considers
+We consider the CCQP
 
 $$
 \begin{aligned}
 \min_{x,\lambda,\eta}\quad
-& \frac{1}{2}x^\top Q_x x + r_x^\top x \\
-&\quad + \frac{1}{2}\lambda^\top Q_\lambda \lambda + r_\lambda^\top \lambda \\
-&\quad + \frac{1}{2}\eta^\top Q_\eta \eta + r_\eta^\top \eta \\
+& \frac{1}{2}
+\begin{bmatrix}x\\ \lambda\\ \eta\end{bmatrix}^{T}
+\begin{bmatrix}
+Q_x & 0 & 0\\
+0 & Q_{\lambda} & 0\\
+0 & 0 & Q_{\eta}
+\end{bmatrix}
+\begin{bmatrix}x\\ \lambda\\ \eta\end{bmatrix}
++
+\begin{bmatrix}r_x\\ r_{\lambda}\\ r_{\eta}\end{bmatrix}^{T}
+\begin{bmatrix}x\\ \lambda\\ \eta\end{bmatrix} \\
 \text{s.t.}\quad
-& A_x x + A_\lambda \lambda + A_\eta \eta - b = 0, \\
-& C_x x + C_\lambda \lambda + C_\eta \eta - d \ge 0, \\
+& A_x x + A_{\lambda}\lambda + A_{\eta}\eta - b = 0, \\
+& C_x x + C_{\lambda}\lambda + C_{\eta}\eta - d \ge 0, \\
 & 0 \le \lambda \perp \eta \ge 0.
 \end{aligned}
 $$
 
-Here $x\in\mathbb{R}^{n_x}$ and $\lambda,\eta\in\mathbb{R}^{n_\lambda}$. The complementarity condition means
+The decision variables are $x \in \mathbb{R}^{n_x}$ and $\lambda,\eta \in \mathbb{R}^{n_\lambda}$. The equality and inequality constraints have dimensions $n_b$ and $n_d$, respectively. The notation $0 \le \lambda \perp \eta \ge 0$ means
 
 $$
-\lambda\ge0,\qquad \eta\ge0,\qquad \lambda^\top\eta=0.
+\lambda \ge 0,\qquad \eta \ge 0,\qquad \lambda^T\eta = 0.
 $$
 
-Direct treatment of complementarity constraints is difficult because standard nonlinear-programming constraint qualifications fail at feasible complementarity points. Gapese instead uses a D-gap penalty reformulation.
+Complementarity constraints violate standard constraint qualifications such as LICQ and MFCQ at feasible points. This loss of constraint regularity is one reason that CCQPs require dedicated numerical methods rather than a direct application of standard nonlinear-programming methods.
 
-## 2. D-gap penalty reformulation
+## 2. Gap penalty reformulation for CCQP
 
-For constants $b>a>0$, define
+### D-gap function and its key properties
 
-$$
-\phi_a(\lambda,\eta)
-=\frac{1}{2a}\left(
-\|\eta\|_2^2-\|\max(0,\eta-a\lambda)\|_2^2
-\right),
-$$
-
-$$
-\phi_b(\lambda,\eta)
-=\frac{1}{2b}\left(
-\|\eta\|_2^2-\|\max(0,\eta-b\lambda)\|_2^2
-\right),
-$$
-
-where the maximum is applied elementwise. The D-gap function is
+Let $a$ and $b$ satisfy $b>a>0$. For $\lambda,\eta \in \mathbb{R}^{n_\lambda}$, define
 
 $$
 \begin{aligned}
-\phi_{ab}(\lambda,\eta)
-&=\phi_a(\lambda,\eta)-\phi_b(\lambda,\eta)\\
-&=\frac{b-a}{2ab}\|\eta\|_2^2
--\frac{1}{2a}\|\max(0,\eta-a\lambda)\|_2^2
-+\frac{1}{2b}\|\max(0,\eta-b\lambda)\|_2^2.
+\varphi^a(\lambda,\eta)
+&= \frac{1}{2a}\left(\|\eta\|_2^2-\|\max(0,\eta-a\lambda)\|_2^2\right),\\
+\varphi^b(\lambda,\eta)
+&= \frac{1}{2b}\left(\|\eta\|_2^2-\|\max(0,\eta-b\lambda)\|_2^2\right),
 \end{aligned}
 $$
 
-The properties used by Gapese are:
-
-- $\phi_{ab}(\lambda,\eta)\ge0$;
-- $\phi_{ab}(\lambda,\eta)=0$ if and only if $0\le\lambda\perp\eta\ge0$;
-- $\phi_{ab}$ is semismoothly differentiable; and
-- it is partially separable across the complementarity pairs.
-
-Gapese replaces the complementarity constraint with the penalty term $\mu\phi_{ab}$, giving
+where the maximum is evaluated element-wise. The D-gap function [8] is
 
 $$
-\begin{aligned}
-P_{\mathrm{gap}}(\mu):\quad
-\min_{x,\lambda,\eta}\quad
-& J(x,\lambda,\eta)+\mu\phi_{ab}(\lambda,\eta)\\
-\text{s.t.}\quad
-& A_x x + A_\lambda\lambda + A_\eta\eta-b=0,\\
-& C_x x + C_\lambda\lambda + C_\eta\eta-d\ge0,
-\end{aligned}
+\varphi^{ab}(\lambda,\eta)
+= \varphi^a(\lambda,\eta)-\varphi^b(\lambda,\eta)
+= \frac{b-a}{2ab}\|\eta\|_2^2
+{}- \frac{1}{2a}\|\max(0,\eta-a\lambda)\|_2^2
+{}+ \frac{1}{2b}\|\max(0,\eta-b\lambda)\|_2^2.
 $$
 
-with $\mu>0$. The penalty parameter is increased when the penalized KKT system has converged but the D-gap residual remains above tolerance.
+The first three properties below are summarized in [1,3], while the partial separability follows the standard definition in [2]:
 
-## 3. Interleaved complementarity variable
-
-For each complementarity pair, define
-
-$$
-\xi_i=\begin{bmatrix}\lambda_i\\\eta_i\end{bmatrix},
-$$
-
-and interleave all pairs as
+- **Non-negativity:** $\varphi^{ab}(\lambda,\eta)\ge 0$ for all $\lambda,\eta$.
+- **Equivalence:** $\varphi^{ab}(\lambda,\eta)=0$ if and only if $0\le\lambda\perp\eta\ge0$.
+- **Differentiability:** $\varphi^{ab}$ is semismoothly differentiable.
+- **Partial separability:**
 
 $$
-\xi=
-[\lambda_1,\eta_1,\ldots,\lambda_{n_\lambda},\eta_{n_\lambda}]^\top
-=S\begin{bmatrix}\lambda\\\eta\end{bmatrix},
-$$
-
-where $S$ is a permutation matrix. The transformed quadratic and constraint data are
-
-$$
-Q_\xi=S^{-\top}
-\begin{bmatrix}
-Q_\lambda&0\\
-0&Q_\eta
-\end{bmatrix}S^{-1},
-\qquad
-r_\xi=S^{-\top}
-\begin{bmatrix}r_\lambda\\r_\eta\end{bmatrix},
-$$
-
-$$
-A_\xi=[A_\lambda\;A_\eta]S^{-1},
-\qquad
-C_\xi=[C_\lambda\;C_\eta]S^{-1}.
-$$
-
-The penalized problem becomes
-
-$$
-\begin{aligned}
-\min_{x,\xi}\quad
-& J(x,\xi)+\mu\phi_{ab}(\xi)\\
-\text{s.t.}\quad
-& A_xx+A_\xi\xi-b=0,\\
-& C_xx+C_\xi\xi-d\ge0,
-\end{aligned}
+\varphi^{ab}(\lambda,\eta)
+= \sum_{i=1}^{n_\lambda}\delta^{ab}(\lambda_i,\eta_i),
 $$
 
 with
 
 $$
-J(x,\xi)=
-\frac12 x^\top Q_xx+r_x^\top x
-+\frac12\xi^\top Q_\xi\xi+r_\xi^\top\xi.
+\delta^{ab}(\lambda_i,\eta_i)
+= \frac{b-a}{2ab}\eta_i^2
+{}- \frac{1}{2a}\{\max(0,\eta_i-a\lambda_i)\}^2
+{}+ \frac{1}{2b}\{\max(0,\eta_i-b\lambda_i)\}^2.
 $$
 
-The implementation uses this interleaved ordering internally.
+### Gap penalty reformulation
 
-## 4. D-gap structure and Hessian modification
-
-Partial separability gives
+Using the non-negativity and equivalence of the D-gap function, the complementarity constraints are replaced by a penalty term. For a penalty parameter $\mu>0$, the gap penalty reformulation is
 
 $$
-\phi_{ab}(\xi)=\sum_{i=1}^{n_\lambda}\delta_{ab}(\xi_i),
-$$
-
-so a generalized Hessian has the block-diagonal structure
-
-$$
-\partial^2\phi_{ab}(\xi)
-=\mathrm{diag}
-\left(
-\partial^2\delta_{ab}(\xi_1),\ldots,
-\partial^2\delta_{ab}(\xi_{n_\lambda})
-\right).
-$$
-
-For one pair $(\lambda_i,\eta_i)$, the $2\times2$ block is indefinite only in the strict region
-
-$$
-b\lambda_i>\eta_i>a\lambda_i.
-$$
-
-In that region,
-
-$$
-\partial^2\delta_{ab}(\xi_i)=
+\begin{aligned}
+\mathcal{P}_{\mathrm{gap}}(\mu):\qquad
+\min_{x,\lambda,\eta}\quad
+& \frac{1}{2}
+\begin{bmatrix}x\\ \lambda\\ \eta\end{bmatrix}^{T}
 \begin{bmatrix}
--a&1\\
-1&-1/b
-\end{bmatrix}.
-$$
-
-Its negative eigenvalue is
-
-$$
-\kappa_{\min}
-=-\frac12\left(a+\frac1b\right)
--\frac12\sqrt{\left(\frac1b-a\right)^2+4}<0.
-$$
-
-Gapese modifies only the strict indefinite blocks. Let
-
-$$
-\omega_i=
-\begin{cases}
-1,& b\lambda_i>\eta_i>a\lambda_i,\\
-0,& \text{otherwise},
-\end{cases}
-$$
-
-then
-
-$$
-B_{\mathrm{reg}}(\xi)
-=-\kappa_{\min}
-\,\mathrm{diag}(\omega_1I_2,\ldots,\omega_{n_\lambda}I_2),
-$$
-
-and the Newton approximation uses
-
-$$
-B(\xi)=\partial^2\phi_{ab}(\xi)+B_{\mathrm{reg}}(\xi)\succeq0.
-$$
-
-The strict inequalities above are important: boundary points use the adjacent positive-semidefinite branch rather than the indefinite branch.
-
-## 5. Semismooth KKT system
-
-Let $\gamma_b\in\mathbb{R}^{n_b}$ be the multiplier of the equality constraints and $\gamma_d\in\mathbb{R}^{n_d}$ the multiplier associated with the linear inequalities. Introduce the inequality slack $v_d\in\mathbb{R}^{n_d}$:
-
-$$
-C_xx+C_\xi\xi-d-v_d=0.
-$$
-
-For the default `fb_sigma = 0`, Gapese uses the standard Fisher-Burmeister mapping
-
-$$
-\psi(v,\gamma)=\sqrt{v^2+\gamma^2}-v-\gamma,
-$$
-
-which satisfies
-
-$$
-\psi(v,\gamma)=0
-\quad\Longleftrightarrow\quad
-0\le v\perp\gamma\ge0.
-$$
-
-The implementation also permits `fb_sigma > 0`, in which case it evaluates the smoothed mapping
-
-$$
-\psi_\sigma(v,\gamma)
-=\sqrt{v^2+\gamma^2+\sigma^2}-v-\gamma.
-$$
-
-Applying the mapping elementwise gives $\Psi(v_d,\gamma_d)$. The semismooth residual is
-
-$$
-\mathcal{T}(x,\xi,v_d,\gamma_b,\gamma_d)=
-\begin{bmatrix}
-Q_xx+r_x+A_x^\top\gamma_b-C_x^\top\gamma_d\\
-Q_\xi\xi+r_\xi+\mu\nabla\phi_{ab}(\xi)+A_\xi^\top\gamma_b-C_\xi^\top\gamma_d\\
-A_xx+A_\xi\xi-b\\
-C_xx+C_\xi\xi-d-v_d\\
-\Psi(v_d,\gamma_d)
-\end{bmatrix}.
-$$
-
-The implementation reports the infinity norm
-
-$$
-\|\mathcal{T}\|_\infty
-$$
-
-as the KKT residual.
-
-## 6. Semismooth Newton direction
-
-At each iteration, Gapese solves a regularized Newton system for
-
-$$
-\Delta z=
-[\Delta x,\Delta\xi,\Delta v_d,\Delta\gamma_b,\Delta\gamma_d].
-$$
-
-With $D_v$ and $D_\gamma$ denoting diagonal generalized derivatives of the Fisher-Burmeister mapping, the linear system has the block form
-
-$$
-\begin{bmatrix}
-Q_x+\nu_xI & 0 & 0 & A_x^\top & -C_x^\top\\
-0 & Q_\xi+\mu B(\xi)+\nu_\xi I & 0 & A_\xi^\top & -C_\xi^\top\\
-A_x & A_\xi & 0 & -\nu_bI & 0\\
-C_x & C_\xi & -I & 0 & 0\\
-0 & 0 & D_v-\nu_dI & 0 & D_\gamma-\nu_dI
+Q_x & 0 & 0\\
+0 & Q_{\lambda} & 0\\
+0 & 0 & Q_{\eta}
 \end{bmatrix}
-\Delta z
-=-\mathcal{T}.
+\begin{bmatrix}x\\ \lambda\\ \eta\end{bmatrix}
++
+\begin{bmatrix}r_x\\ r_{\lambda}\\ r_{\eta}\end{bmatrix}^{T}
+\begin{bmatrix}x\\ \lambda\\ \eta\end{bmatrix}
+{}+ \mu\varphi^{ab}(\lambda,\eta) \\
+\text{s.t.}\quad
+& A_x x + A_{\lambda}\lambda + A_{\eta}\eta - b = 0, \\
+& C_x x + C_{\lambda}\lambda + C_{\eta}\eta - d \ge 0.
+\end{aligned}
 $$
 
-The regularization parameters correspond to the public options `nu_x`, `nu_xi`, `nu_b`, and `nu_d`.
+A solution of the original CCQP can be approached by solving a sequence of $\mathcal{P}_{\mathrm{gap}}(\mu)$ with increasing $\mu$ [5]. Compared with complementarity-penalty reformulations, this formulation does not retain the explicit inequalities $\lambda,\eta\ge0$. Compared with relaxation or smoothing reformulations, its constraint system remains differentiable and regular independently of $\mu$.
 
-The current C++ implementation assembles this system as an Eigen sparse matrix. It first attempts an Eigen `SparseLU` solve and uses `SparseQR` as a robustness fallback when the LU solve is unsuccessful or produces a non-finite solution.
+The remaining difficulty is the nonconvexity of $\varphi^{ab}$. Gapese exploits the sparsity and convexity structure of the D-gap function to construct a positive-semidefinite approximation of its generalized Hessian.
 
-The Newton step is rejected if its infinity norm is non-finite or reaches the `newton_step_max` threshold.
+## 3. Sparsity and convexity structure of the D-gap function
 
-## 7. Merit-function globalization
+### Variable transformation
 
-Gapese globalizes the Newton step with an $\ell_1$ merit function
+Define the interleaved variable
 
 $$
-\Theta(x,\xi,v_d,\gamma_b,\gamma_d;\mu)
-=J(x,\xi)+\mu\phi_{ab}(\xi)+\beta\|M(x,\xi,v_d,\gamma_d)\|_1,
+\xi
+= \begin{bmatrix}\xi_1^T & \cdots & \xi_{n_\lambda}^T\end{bmatrix}^{T},
+\qquad
+\xi_i = \begin{bmatrix}\lambda_i\\ \eta_i\end{bmatrix},
+$$
+
+or equivalently
+
+$$
+\xi = S\begin{bmatrix}\lambda\\ \eta\end{bmatrix},
+$$
+
+where $S\in\mathbb{R}^{2n_\lambda\times 2n_\lambda}$ is nonsingular. The gap penalty problem can then be written as
+
+$$
+\begin{aligned}
+\mathcal{P}^{\xi}_{\mathrm{gap}}(\mu):\qquad
+\min_{x,\xi}\quad
+& \frac{1}{2}
+\begin{bmatrix}x\\ \xi\end{bmatrix}^{T}
+\begin{bmatrix}Q_x & 0\\ 0 & Q_{\xi}\end{bmatrix}
+\begin{bmatrix}x\\ \xi\end{bmatrix}
++
+\begin{bmatrix}r_x\\ r_{\xi}\end{bmatrix}^{T}
+\begin{bmatrix}x\\ \xi\end{bmatrix}
+{}+ \mu\varphi^{ab}(\xi) \\
+\text{s.t.}\quad
+& A_x x + A_{\xi}\xi - b = 0, \\
+& C_x x + C_{\xi}\xi - d \ge 0,
+\end{aligned}
 $$
 
 where
 
 $$
-M(x,\xi,v_d,\gamma_d)=
+\begin{aligned}
+Q_{\xi}
+&= (S^{-1})^T
+\begin{bmatrix}Q_{\lambda} & 0\\ 0 & Q_{\eta}\end{bmatrix}S^{-1},\\
+r_{\xi}
+&= (S^{-1})^T\begin{bmatrix}r_{\lambda}\\ r_{\eta}\end{bmatrix},\\
+A_{\xi}
+&= \begin{bmatrix}A_{\lambda} & A_{\eta}\end{bmatrix}S^{-1},\\
+C_{\xi}
+&= \begin{bmatrix}C_{\lambda} & C_{\eta}\end{bmatrix}S^{-1}.
+\end{aligned}
+$$
+
+For convenience, denote the quadratic part of the transformed objective by
+
+$$
+J(x,\xi)
+= \frac{1}{2}
+\begin{bmatrix}x\\ \xi\end{bmatrix}^{T}
+\begin{bmatrix}Q_x & 0\\ 0 & Q_{\xi}\end{bmatrix}
+\begin{bmatrix}x\\ \xi\end{bmatrix}
++
+\begin{bmatrix}r_x\\ r_{\xi}\end{bmatrix}^{T}
+\begin{bmatrix}x\\ \xi\end{bmatrix}.
+$$
+
+### Partial separability
+
+With the interleaved variable $\xi$, the partial separability of the D-gap function gives a block-diagonal generalized Hessian:
+
+$$
+\partial^2\varphi^{ab}(\xi)
+= \operatorname{diag}\left\{
+\partial^2\delta^{ab}(\xi_1),\ldots,
+\partial^2\delta^{ab}(\xi_{n_\lambda})
+\right\}.
+$$
+
+Therefore, negative eigenvalues can only originate from the $2\times2$ blocks $\partial^2\delta^{ab}(\xi_i)$ that are indefinite.
+
+### Piecewise structure
+
+Each scalar subfunction has the piecewise representation
+
+$$
+\delta^{ab}(\lambda_i,\eta_i)
+=
+\begin{cases}
+\dfrac{b-a}{2}\lambda_i^2,
+& \eta_i\ge b\lambda_i \text{ and } \eta_i\ge a\lambda_i,\\[4pt]
+-\dfrac{a}{2}\lambda_i^2 + \lambda_i\eta_i - \dfrac{1}{2b}\eta_i^2,
+& b\lambda_i>\eta_i>a\lambda_i,\\[4pt]
+\dfrac{b-a}{2ab}\eta_i^2,
+& \eta_i\le b\lambda_i \text{ and } \eta_i\le a\lambda_i,\\[4pt]
+\dfrac{b}{2}\lambda_i^2 - \lambda_i\eta_i + \dfrac{1}{2a}\eta_i^2,
+& b\lambda_i<\eta_i<a\lambda_i.
+\end{cases}
+$$
+
+The block $\partial^2\delta^{ab}(\xi_i)$ is indefinite only in the region
+
+$$
+b\lambda_i>\eta_i>a\lambda_i,
+$$
+
+and is positive semidefinite otherwise. In the indefinite region,
+
+$$
+\partial^2\delta^{ab}(\xi_i)
+=
 \begin{bmatrix}
-A_xx+A_\xi\xi-b\\
-C_xx+C_\xi\xi-d-v_d\\
+-a & 1\\
+1 & -\dfrac{1}{b}
+\end{bmatrix}.
+$$
+
+Its eigenvalues are
+
+$$
+\begin{aligned}
+\kappa_{\min}
+&= -\frac{1}{2}\left(a+\frac{1}{b}\right)
+-\frac{1}{2}\sqrt{\left(\frac{1}{b}-a\right)^2+4}<0,\\
+\kappa_{\max}
+&= -\frac{1}{2}\left(a+\frac{1}{b}\right)
++\frac{1}{2}\sqrt{\left(\frac{1}{b}-a\right)^2+4}>0.
+\end{aligned}
+$$
+
+### Hessian modification
+
+Let
+
+$$
+\mathcal{I}_{\mathrm{ind}}
+= \{i\mid b\lambda_i>\eta_i>a\lambda_i\},
+\qquad
+\mathcal{I}_{\mathrm{psd}}
+= \{1,\ldots,n_\lambda\}\setminus\mathcal{I}_{\mathrm{ind}}.
+$$
+
+Gapese constructs a positive-semidefinite approximation $B(\xi)$ of the generalized Hessian by preserving the positive-semidefinite blocks and regularizing only the indefinite blocks:
+
+$$
+B(\xi)=\partial^2\varphi^{ab}(\xi)+B_{\mathrm{reg}}(\xi),
+$$
+
+with
+
+$$
+B_{\mathrm{reg}}(\xi)
+= -\kappa_{\min}\operatorname{diag}
+\left\{\omega_1 I_{2\times2},\ldots,\omega_{n_\lambda}I_{2\times2}\right\},
+$$
+
+where
+
+$$
+\omega_i=
+\begin{cases}
+0, & i\in\mathcal{I}_{\mathrm{psd}},\\
+1, & i\in\mathcal{I}_{\mathrm{ind}}.
+\end{cases}
+$$
+
+If $\mathcal{I}_{\mathrm{ind}}$ is empty, $B(\xi)$ equals the exact positive-semidefinite generalized Hessian. Otherwise, the modification shifts only the indefinite $2\times2$ blocks using the pre-computed value $\kappa_{\min}$, without requiring a factorization of $\partial^2\varphi^{ab}(\xi)$.
+
+## 4. Semismooth Newton method
+
+For a fixed penalty parameter $\mu$, Gapese solves $\mathcal{P}^{\xi}_{\mathrm{gap}}(\mu)$ with a semismooth Newton method using the Hessian modification above.
+
+### KKT conditions and their semismooth equation reformulation
+
+Let $\gamma_b\in\mathbb{R}^{n_b}$ and $\gamma_d\in\mathbb{R}^{n_d}$ be the Lagrange multipliers associated with the equality and inequality constraints. The KKT conditions are
+
+$$
+\begin{aligned}
+&
+\begin{bmatrix}Q_x & 0\\ 0 & Q_{\xi}\end{bmatrix}
+\begin{bmatrix}x\\ \xi\end{bmatrix}
++
+\begin{bmatrix}r_x\\ r_{\xi}\end{bmatrix}
++
+\begin{bmatrix}0\\ \mu(\nabla_{\xi}\varphi^{ab}(\xi))^T\end{bmatrix}
++
+\begin{bmatrix}A_x^T\\ A_{\xi}^T\end{bmatrix}\gamma_b
+-
+\begin{bmatrix}C_x^T\\ C_{\xi}^T\end{bmatrix}\gamma_d
+=0,\\
+& A_xx+A_{\xi}\xi-b=0,\\
+& 0\le\gamma_d\perp C_xx+C_{\xi}\xi-d\ge0.
+\end{aligned}
+$$
+
+Introduce the auxiliary variable $v_d\in\mathbb{R}^{n_d}$ and the Fisher--Burmeister function [1]
+
+$$
+\psi(p,q)=\sqrt{p^2+q^2}-p-q,
+$$
+
+which satisfies $\psi(p,q)=0$ if and only if $p\ge0$, $q\ge0$, and $pq=0$. Applying $\psi$ element-wise gives $\Psi(v_d,\gamma_d)$, and the KKT conditions can be written as the semismooth system
+
+$$
+\boldsymbol{T}(x,\xi,v_d,\gamma_b,\gamma_d)
+=
+\begin{bmatrix}
+Q_xx+r_x+A_x^T\gamma_b-C_x^T\gamma_d\\
+Q_{\xi}\xi+r_{\xi}+\mu(\nabla_{\xi}\varphi^{ab}(\xi))^T+A_{\xi}^T\gamma_b-C_{\xi}^T\gamma_d\\
+A_xx+A_{\xi}\xi-b\\
+C_xx+C_{\xi}\xi-d-v_d\\
+\Psi(v_d,\gamma_d)
+\end{bmatrix}
+=0.
+$$
+
+For a given $\mu$, the inner iteration satisfies the KKT tolerance when
+
+$$
+\left\|\boldsymbol{T}(x^k,\xi^k,v_d^k,\gamma_b^k,\gamma_d^k)\right\|
+\le \epsilon_T.
+$$
+
+### Newton system
+
+At an iterate $(x^k,\xi^k,v_d^k,\gamma_b^k,\gamma_d^k)$, the search direction $(\Delta x,\Delta\xi,\Delta v_d,\Delta\gamma_b,\Delta\gamma_d)$ is obtained from
+
+$$
+\begin{bmatrix}
+Q_x+\nu_x I & 0 & 0 & A_x^T & -C_x^T\\
+0 & Q_{\xi}+\mu B^k+\nu_{\xi}I & 0 & A_{\xi}^T & -C_{\xi}^T\\
+A_x & A_{\xi} & 0 & -\nu_b I & 0\\
+C_x & C_{\xi} & -I & 0 & 0\\
+0 & 0 & \partial_{v_d}\Psi^k-\nu_d I & 0 & \partial_{\gamma_d}\Psi^k-\nu_d I
+\end{bmatrix}
+\begin{bmatrix}
+\Delta x\\
+\Delta\xi\\
+\Delta v_d\\
+\Delta\gamma_b\\
+\Delta\gamma_d
+\end{bmatrix}
+=
+-\boldsymbol{T}(x^k,\xi^k,v_d^k,\gamma_b^k,\gamma_d^k),
+$$
+
+where $B^k=B(\xi^k)$ and $\nu_x,\nu_{\xi},\nu_b,\nu_d\ge0$ are regularization parameters.
+
+### Merit-function line search
+
+The search direction is globalized with an $\ell_1$ exact-penalty merit function [6,7]:
+
+$$
+\Theta(x,\xi,v_d,\gamma_b,\gamma_d,\mu)
+=J(x,\xi)+\mu\varphi^{ab}(\xi)
++\beta\|M(x,\xi,v_d,\gamma_d)\|_1,
+$$
+
+where
+
+$$
+M(x,\xi,v_d,\gamma_d)
+=
+\begin{bmatrix}
+A_xx+A_{\xi}\xi-b\\
+C_xx+C_{\xi}\xi-d-v_d\\
 \Psi(v_d,\gamma_d)
 \end{bmatrix}.
 $$
 
-For the current iterate and Newton direction, the directional model is
+For the Newton direction, the directional derivative is
 
 $$
-D\Theta
-=DJ+\mu D\phi_{ab}-\beta\|M\|_1.
+\mathbb{D}\Theta^k
+= \nabla_xJ^k\Delta x
+{}+ \nabla_{\xi}J^k\Delta\xi
+{}+ \mu\nabla_{\xi}\varphi^{ab}(\xi^k)\Delta\xi
+{}- \beta\|M^k\|_1
+\le -\rho\beta\|M^k\|_1.
 $$
 
-Starting from `beta_init`, the implementation increases $\beta$ when necessary so that it exceeds the trial bound implied by the descent condition with parameter `rho`.
-
-The line search starts from $\alpha=1$ and checks the Armijo condition
+The weighting parameter is chosen so that
 
 $$
-\Theta(z+\alpha\Delta z)
+\beta\ge\beta_{\mathrm{trial}}
+=
+\frac{
+\underbrace{\left((x^k)^TQ_x+r_x^T\right)}_{\nabla_xJ^k}\Delta x
++
+\underbrace{\left((\xi^k)^TQ_{\xi}+r_{\xi}^T\right)}_{\nabla_{\xi}J^k}\Delta\xi
++
+\mu\nabla_{\xi}\varphi^{ab}(\xi^k)\Delta\xi
+}{(1-\rho)\|M^k\|_1},
+$$
+
+with $\rho\in(0,1)$. Starting from $\alpha_{\max}=1$, backtracking reduces $\alpha$ by $\alpha\leftarrow\nu_{\alpha}\alpha$ until the Armijo condition is satisfied:
+
+$$
+\Theta(x^k+\alpha\Delta x,\xi^k+\alpha\Delta\xi,v_d^k+\alpha\Delta v_d,\gamma_b^k+\alpha\Delta\gamma_b,\gamma_d^k+\alpha\Delta\gamma_d,\mu)
 \le
-\Theta(z)+\nu_D\alpha D\Theta.
+\Theta(x^k,\xi^k,v_d^k,\gamma_b^k,\gamma_d^k,\mu)
++\nu_D\alpha\mathbb{D}\Theta^k.
 $$
 
-If the condition fails, the stepsize is contracted by
+The reference algorithm uses $\rho=0.1$, $\nu_{\alpha}=0.5$, and $\nu_D=10^{-4}$.
 
-$$
-\alpha\leftarrow\nu_\alpha\alpha
-$$
+## 5. Overall algorithm
 
-until the condition is satisfied or `alpha_min` is reached. Failure to find an acceptable step at the minimum stepsize terminates the solve with failure status.
+Given the CCQP data and an initial guess $(x^0,\lambda^0,\eta^0)$:
 
-## 8. Penalty continuation and termination
-
-The penalty parameter starts at
-
-$$
-\mu=\mu_{\min}.
-$$
-
-At each iteration, Gapese evaluates the quadratic objective, the D-gap residual $\phi_{ab}(\xi)$, and the KKT residual $\|\mathcal{T}\|_\infty$.
-
-The termination logic is:
-
-1. If `KKT_res <= tol_kkt` and `D_gap_res <= tol_dgap`, return success.
-2. If the KKT tolerance is satisfied but the D-gap tolerance is not, increase
-
-   $$
-   \mu\leftarrow\min(\sigma_\mu\mu,\mu_{\max}),
-   $$
-
-   where $\sigma_\mu$ is the `mu_update` option and $\mu_{\max}$ is `mu_max`.
-
-3. If the D-gap tolerance still fails when the maximum penalty parameter has been reached, terminate with failure.
-4. Otherwise compute a Newton direction, perform the merit line search, and update all primal-dual variables.
-5. Terminate with failure if the iteration limit, Newton-step threshold, linear solve, or line search prevents convergence.
-
-Thus, `status == 1` is assigned only when **both** requested residual conditions are satisfied.
-
-## 9. Initialization and warm starts
-
-The required initial values are
-
-$$
-x^0,\qquad \lambda^0,\qquad \eta^0.
-$$
-
-The optional primal-dual values are
-
-$$
-v_d^0,\qquad \gamma_b^0,\qquad \gamma_d^0.
-$$
-
-If these optional values are omitted, Gapese initializes them as vectors of ones. The returned solution contains all six vectors, so the entire solution can be passed back as a warm start for a repeated solve with compatible dimensions.
-
-## 10. Algorithm outline
-
-A compact view of the implemented iteration is:
-
-```text
-input CCQP data and initial guess
-        |
-        v
-interleave (lambda, eta) -> xi
-        |
-        v
-initialize mu = mu_min
-        |
-        v
-compute KKT and D-gap residuals
-        |
-        +-- both satisfy tolerances --> success
-        |
-        +-- KKT satisfied only --> increase mu
-        |
-        v
-build modified D-gap Hessian B(xi)
-        |
-        v
-assemble and solve semismooth Newton system
-        |
-        v
-select beta and perform merit backtracking
-        |
-        v
-update x, xi, v_d, gamma_b, gamma_d
-        |
-        +------------------------------> repeat
-```
+1. Choose $k_{\max}$, $\epsilon_{\varphi}>0$, $\epsilon_T>0$, $\mu>0$, $\sigma_{\mu}\ge1$, and $b>a>0$. Pre-compute $\kappa_{\min}$.
+2. Form $\xi^0$ and the transformed data $Q_{\xi}$, $r_{\xi}$, $A_{\xi}$, and $C_{\xi}$. Initialize $x^k=x^0$, $\xi^k=\xi^0$, $v_d^k=\mathbf{1}$, $\gamma_b^k=\mathbf{1}$, and $\gamma_d^k=\mathbf{1}$.
+3. For $k=1,\ldots,k_{\max}$:
+   1. If the KKT residual satisfies $\|\boldsymbol{T}^k\|\le\epsilon_T$:
+      - If $\varphi^{ab}(\xi^k)\le\epsilon_{\varphi}$, terminate with $(x^*,\lambda^*,\eta^*)$.
+      - Otherwise update the penalty parameter as $\mu\leftarrow\sigma_{\mu}\mu$.
+   2. Construct $B(\xi^k)$ and solve the semismooth Newton system for $(\Delta x,\Delta\xi,\Delta v_d,\Delta\gamma_b,\Delta\gamma_d)$.
+   3. Choose the merit weight $\beta$ and perform backtracking line search to obtain $\alpha$.
+   4. Update all primal, auxiliary, and dual variables with the step length $\alpha$.
 
 ## References
 
-1. F. Facchinei and J. S. Pang, *Finite-Dimensional Variational Inequalities and Complementarity Problems*, Springer, 2003.
-2. K. Lin and T. Ohtsuka, “A gap penalty method for optimal control of linear complementarity systems,” *63rd IEEE Conference on Decision and Control*, 2024.
-3. K. Lin and T. Ohtsuka, “A gap penalty reformulation for mathematical programming with complementarity constraints: Convergence analysis,” *IEEE Control Systems Letters*, vol. 9, pp. 925–930, 2025.
-4. K. Lin and T. Ohtsuka, “A non-interior-point continuation method for the optimal control problem with equilibrium constraints,” *Automatica*, vol. 171, 111940, 2025.
-5. J. Nocedal and S. J. Wright, *Numerical Optimization*, Springer, 2006.
-6. J. M. Peng and Y. Yuan, “Unconstrained methods for generalized complementarity problems,” *Journal of Computational Mathematics*, pp. 253–264, 1997.
+1. F. Facchinei and J. S. Pang, *Finite-Dimensional Variational Inequalities and Complementarity Problems*. Springer, 2003.
+2. S. Gros and M. Diehl, *Numerical Optimal Control (Draft)*, 2020.
+3. K. Lin and T. Ohtsuka, “Dynamical System Approach for Optimal Control Problems with Equilibrium Constraints Using Gap-Constraint-Based Reformulation,” arXiv:2412.01326, 2024.
+4. K. Lin and T. Ohtsuka, “A Gap Penalty Method for Optimal Control of Linear Complementarity Systems,” 63rd IEEE Conference on Decision and Control (CDC), pp. 880–887, 2024.
+5. K. Lin and T. Ohtsuka, “A Gap Penalty Reformulation for Mathematical Programming with Complementarity Constraints: Convergence Analysis,” *IEEE Control System Letters*, vol. 9, pp. 925–930, 2025.
+6. K. Lin and T. Ohtsuka, “A Non-Interior-Point Continuation Method for the Optimal Control Problem with Equilibrium Constraints,” *Automatica*, vol. 171, 111940, 2025.
+7. J. Nocedal and S. J. Wright, *Numerical Optimization*. Springer, 2006.
+8. J. M. Peng and Y. Yuan, “Unconstrained Methods for Generalized Complementarity Problems,” *Journal of Computational Mathematics*, pp. 253–264, 1997.
