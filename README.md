@@ -83,9 +83,7 @@ Minimal examples are provided for all supported interfaces:
 
 ## Documentation
 
-- [Algorithm](docs/algorithm.md)
-
-Detailed interface, solver-option, and output documentation will be added under `docs/`.
+Detailed algorithm and interface documentation will be added under `docs/`.
 
 ## License
 
