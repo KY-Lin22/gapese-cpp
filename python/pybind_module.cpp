@@ -267,6 +267,11 @@ py::tuple result_to_python(const gapese::SolveResult& result) {
     py::dict timing;
     timing["check_termination"] = result.info.timing.check_termination;
     timing["search_direction"] = result.info.timing.search_direction;
+    timing["kkt_assembly"] = result.info.timing.kkt_assembly;
+    timing["lu_analyze"] = result.info.timing.lu_analyze;
+    timing["lu_factorize"] = result.info.timing.lu_factorize;
+    timing["lu_solve"] = result.info.timing.lu_solve;
+    timing["search_other"] = result.info.timing.search_other;
     timing["step_size"] = result.info.timing.step_size;
     timing["else"] = result.info.timing.other;
     timing["total"] = result.info.timing.total;

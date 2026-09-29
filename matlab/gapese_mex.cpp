@@ -298,10 +298,17 @@ mxArray* solution_to_mx(const SolveResult& result) {
 }
 
 mxArray* info_to_mx(const SolveResult& result) {
-    const char* time_names[] = {"check_termination", "search_direction", "step_size", "else", "total"};
-    mxArray* time = mxCreateStructMatrix(1, 1, 5, time_names);
+    const char* time_names[] = {
+        "check_termination", "search_direction", "kkt_assembly", "lu_analyze", "lu_factorize",
+        "lu_solve", "search_other", "step_size", "else", "total"};
+    mxArray* time = mxCreateStructMatrix(1, 1, 10, time_names);
     mxSetField(time, 0, "check_termination", mxCreateDoubleScalar(result.info.timing.check_termination));
     mxSetField(time, 0, "search_direction", mxCreateDoubleScalar(result.info.timing.search_direction));
+    mxSetField(time, 0, "kkt_assembly", mxCreateDoubleScalar(result.info.timing.kkt_assembly));
+    mxSetField(time, 0, "lu_analyze", mxCreateDoubleScalar(result.info.timing.lu_analyze));
+    mxSetField(time, 0, "lu_factorize", mxCreateDoubleScalar(result.info.timing.lu_factorize));
+    mxSetField(time, 0, "lu_solve", mxCreateDoubleScalar(result.info.timing.lu_solve));
+    mxSetField(time, 0, "search_other", mxCreateDoubleScalar(result.info.timing.search_other));
     mxSetField(time, 0, "step_size", mxCreateDoubleScalar(result.info.timing.step_size));
     mxSetField(time, 0, "else", mxCreateDoubleScalar(result.info.timing.other));
     mxSetField(time, 0, "total", mxCreateDoubleScalar(result.info.timing.total));

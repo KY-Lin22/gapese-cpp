@@ -37,17 +37,32 @@ void require_vector_size(const Vector& vector, int size, const char* name) {
     }
 }
 
-bool solve_sparse_system(const SparseMatrix& matrix, const Vector& rhs, Vector& solution) {
+bool solve_sparse_system(
+    const SparseMatrix& matrix,
+    const Vector& rhs,
+    Vector& solution,
+    Timing& timing) {
     Eigen::SparseLU<SparseMatrix, Eigen::COLAMDOrdering<int>> lu;
-    lu.compute(matrix);
+
+    auto phase_start = Clock::now();
+    lu.analyzePattern(matrix);
+    timing.lu_analyze += elapsed_seconds(phase_start);
+
+    phase_start = Clock::now();
+    lu.factorize(matrix);
+    timing.lu_factorize += elapsed_seconds(phase_start);
     if (lu.info() == Eigen::Success) {
+        phase_start = Clock::now();
         solution = lu.solve(rhs);
+        timing.lu_solve += elapsed_seconds(phase_start);
         if (lu.info() == Eigen::Success && solution.allFinite()) {
             return true;
         }
     }
 
     // Robust fallback for singular or nearly singular Newton systems.
+    // Its cost is intentionally included in Timing::search_other during this
+    // profiling-only baseline patch.
     Eigen::SparseQR<SparseMatrix, Eigen::COLAMDOrdering<int>> qr;
     qr.compute(matrix);
     if (qr.info() != Eigen::Success) {
@@ -275,9 +290,12 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
         timing.check_termination += elapsed_seconds(termination_start);
 
         const auto search_start = Clock::now();
+        const auto assembly_start = Clock::now();
         const SparseMatrix kkt_matrix = kkt_.matrix(mu, xi, v_d, gamma_d, data, transformed);
+        timing.kkt_assembly += elapsed_seconds(assembly_start);
+
         Vector newton_step;
-        if (!solve_sparse_system(kkt_matrix, -kkt_residual, newton_step)) {
+        if (!solve_sparse_system(kkt_matrix, -kkt_residual, newton_step, timing)) {
             status = 0;
             message = "- Solver fails: KKT linear solve failed";
             timing.search_direction += elapsed_seconds(search_start);
@@ -370,6 +388,10 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
     }
 
     timing.total = elapsed_seconds(total_start);
+    timing.search_other = std::max(
+        0.0,
+        timing.search_direction - timing.kkt_assembly - timing.lu_analyze -
+            timing.lu_factorize - timing.lu_solve);
     timing.other = std::max(0.0, timing.total - timing.check_termination - timing.search_direction - timing.step_size);
 
     SolveResult result;
