@@ -37,18 +37,15 @@ void require_vector_size(const Vector& vector, int size, const char* name) {
     }
 }
 
-bool solve_sparse_system(
+using SparseLUSolver = Eigen::SparseLU<SparseMatrix, Eigen::COLAMDOrdering<int>>;
+
+bool factor_and_solve_sparse_system(
+    SparseLUSolver& lu,
     const SparseMatrix& matrix,
     const Vector& rhs,
     Vector& solution,
     Timing& timing) {
-    Eigen::SparseLU<SparseMatrix, Eigen::COLAMDOrdering<int>> lu;
-
     auto phase_start = Clock::now();
-    lu.analyzePattern(matrix);
-    timing.lu_analyze += elapsed_seconds(phase_start);
-
-    phase_start = Clock::now();
     lu.factorize(matrix);
     timing.lu_factorize += elapsed_seconds(phase_start);
     if (lu.info() == Eigen::Success) {
@@ -61,8 +58,7 @@ bool solve_sparse_system(
     }
 
     // Robust fallback for singular or nearly singular Newton systems.
-    // Its cost is intentionally included in Timing::search_other during this
-    // profiling-only baseline patch.
+    // Its cost is intentionally included in Timing::search_other.
     Eigen::SparseQR<SparseMatrix, Eigen::COLAMDOrdering<int>> qr;
     qr.compute(matrix);
     if (qr.info() != Eigen::Success) {
@@ -224,6 +220,17 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
     double mu = options_.mu_min;
     Timing timing;
 
+    const auto initial_kkt_start = Clock::now();
+    const auto initial_assembly_start = Clock::now();
+    detail::KKTWorkspace kkt_workspace = kkt_.initialize_matrix(data, transformed);
+    timing.kkt_assembly += elapsed_seconds(initial_assembly_start);
+
+    SparseLUSolver lu;
+    const auto analyze_start = Clock::now();
+    lu.analyzePattern(kkt_workspace.matrix);
+    timing.lu_analyze += elapsed_seconds(analyze_start);
+    timing.search_direction += elapsed_seconds(initial_kkt_start);
+
     double newton_norm = std::numeric_limits<double>::quiet_NaN();
     double alpha = std::numeric_limits<double>::quiet_NaN();
     double beta = std::numeric_limits<double>::quiet_NaN();
@@ -291,11 +298,12 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
 
         const auto search_start = Clock::now();
         const auto assembly_start = Clock::now();
-        const SparseMatrix kkt_matrix = kkt_.matrix(mu, xi, v_d, gamma_d, data, transformed);
+        kkt_.update_matrix(kkt_workspace, mu, xi, v_d, gamma_d);
         timing.kkt_assembly += elapsed_seconds(assembly_start);
 
         Vector newton_step;
-        if (!solve_sparse_system(kkt_matrix, -kkt_residual, newton_step, timing)) {
+        if (!factor_and_solve_sparse_system(
+                lu, kkt_workspace.matrix, -kkt_residual, newton_step, timing)) {
             status = 0;
             message = "- Solver fails: KKT linear solve failed";
             timing.search_direction += elapsed_seconds(search_start);

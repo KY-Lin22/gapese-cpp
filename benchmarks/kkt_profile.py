@@ -158,6 +158,7 @@ def _solve_once(problem_size, ccqp, initial, options):
         "iter": int(info.get("iter_num", 0)),
         "KKT_res": float(info.get("KKT_res", np.nan)),
         "D_gap_res": float(info.get("D_gap_res", np.nan)),
+        "cost": float(info.get("cost", np.nan)),
         **{name: float(timing[name]) for name in TIMING_FIELDS},
     }
 
@@ -218,7 +219,8 @@ def _run_problem(name, options):
     last = rows[-1]
     print(
         f"           status={last['status']}  iter={last['iter']}  "
-        f"KKT_res={last['KKT_res']:.3e}  D_gap_res={last['D_gap_res']:.3e}"
+        f"KKT_res={last['KKT_res']:.3e}  D_gap_res={last['D_gap_res']:.3e}  "
+        f"cost={last['cost']:.12e}"
     )
 
 

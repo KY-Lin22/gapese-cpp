@@ -55,6 +55,24 @@ Vector DGapEvaluator::gradient(const Vector& xi) const {
     return gradient;
 }
 
+std::array<double, 3> DGapEvaluator::modified_hessian_block(double lambda, double eta) const {
+    const bool region_1 = (eta >= b_ * lambda) && (eta >= a_ * lambda);
+    const bool region_2 = (b_ * lambda > eta) && (eta > a_ * lambda);
+    const bool region_3 = (eta <= b_ * lambda) && (eta <= a_ * lambda);
+    const double regularization = -kappa_min_;
+
+    if (region_1) {
+        return {b_ - a_, 0.0, 0.0};
+    }
+    if (region_2) {
+        return {-a_ + regularization, 1.0, -1.0 / b_ + regularization};
+    }
+    if (region_3) {
+        return {0.0, 0.0, (b_ - a_) / (a_ * b_)};
+    }
+    return {b_, -1.0, 1.0 / a_};
+}
+
 SparseMatrix DGapEvaluator::modified_hessian(const Vector& xi) const {
     if (xi.size() % 2 != 0) {
         throw std::invalid_argument("xi must have even length");
@@ -62,33 +80,12 @@ SparseMatrix DGapEvaluator::modified_hessian(const Vector& xi) const {
 
     std::vector<Triplet> triplets;
     triplets.reserve(static_cast<std::size_t>(4 * xi.size() / 2));
-    const double regularization = -kappa_min_;
 
     for (int i = 0; i < xi.size() / 2; ++i) {
-        const double lambda = xi[2 * i];
-        const double eta = xi[2 * i + 1];
-
-        const bool region_1 = (eta >= b_ * lambda) && (eta >= a_ * lambda);
-        const bool region_2 = (b_ * lambda > eta) && (eta > a_ * lambda);
-        const bool region_3 = (eta <= b_ * lambda) && (eta <= a_ * lambda);
-
-        double h11 = 0.0;
-        double h12 = 0.0;
-        double h22 = 0.0;
-
-        if (region_1) {
-            h11 = b_ - a_;
-        } else if (region_2) {
-            h11 = -a_ + regularization;
-            h12 = 1.0;
-            h22 = -1.0 / b_ + regularization;
-        } else if (region_3) {
-            h22 = (b_ - a_) / (a_ * b_);
-        } else {
-            h11 = b_;
-            h12 = -1.0;
-            h22 = 1.0 / a_;
-        }
+        const auto block = modified_hessian_block(xi[2 * i], xi[2 * i + 1]);
+        const double h11 = block[0];
+        const double h12 = block[1];
+        const double h22 = block[2];
 
         const int l = 2 * i;
         const int e = 2 * i + 1;

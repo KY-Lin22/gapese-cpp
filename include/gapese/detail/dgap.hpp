@@ -2,6 +2,8 @@
 
 #include "gapese/types.hpp"
 
+#include <array>
+
 namespace gapese::detail {
 
 class DGapEvaluator {
@@ -11,6 +13,7 @@ public:
     double value(const Vector& xi) const;
     Vector gradient(const Vector& xi) const;
     SparseMatrix modified_hessian(const Vector& xi) const;
+    std::array<double, 3> modified_hessian_block(double lambda, double eta) const;
 
     double a() const noexcept { return a_; }
     double b() const noexcept { return b_; }

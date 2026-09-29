@@ -1,5 +1,6 @@
 #include "gapese/detail/kkt.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
@@ -50,18 +51,16 @@ void add_constant_diagonal(
     }
 }
 
-void add_vector_diagonal(
-    std::vector<Triplet>& triplets,
-    int row_offset,
-    int col_offset,
-    const Vector& values,
-    double shift = 0.0) {
-    for (int i = 0; i < values.size(); ++i) {
-        const double value = values[i] + shift;
-        if (value != 0.0) {
-            triplets.emplace_back(row_offset + i, col_offset + i, value);
-        }
+int value_index(const SparseMatrix& matrix, int row, int col) {
+    const int begin = matrix.outerIndexPtr()[col];
+    const int end = matrix.outerIndexPtr()[col + 1];
+    const int* first = matrix.innerIndexPtr() + begin;
+    const int* last = matrix.innerIndexPtr() + end;
+    const int* position = std::lower_bound(first, last, row);
+    if (position == last || *position != row) {
+        throw std::logic_error("KKT structural entry was not reserved");
     }
+    return begin + static_cast<int>(position - first);
 }
 
 }  // namespace
@@ -109,17 +108,14 @@ Vector KKTAssembler::residual(
     return result;
 }
 
-SparseMatrix KKTAssembler::matrix(
-    double mu,
-    const Vector& xi,
-    const Vector& v_d,
-    const Vector& gamma_d,
+KKTWorkspace KKTAssembler::initialize_matrix(
     const CcqpData& data,
     const TransformedData& transformed) const {
     const int nx = problem_.n_x;
     const int nxi = transformed_dim(problem_);
     const int nb = problem_.n_b;
     const int nd = problem_.n_d;
+    const int nl = problem_.n_lambda;
     const int dim = kkt_dim(problem_);
 
     const int col_x = 0;
@@ -134,23 +130,20 @@ SparseMatrix KKTAssembler::matrix(
     const int row_ineq = row_eq + nb;
     const int row_fb = row_ineq + nd;
 
-    const SparseMatrix B = dgap_.modified_hessian(xi);
-    const auto [d_v, d_gamma] = fb_.jacobian_diagonals(v_d, gamma_d);
-
     std::vector<Triplet> triplets;
     triplets.reserve(static_cast<std::size_t>(
-        data.Q_x.nonZeros() + transformed.Q_xi.nonZeros() + B.nonZeros() +
+        data.Q_x.nonZeros() + transformed.Q_xi.nonZeros() +
         2 * data.A_x.nonZeros() + 2 * transformed.A_xi.nonZeros() +
         2 * data.C_x.nonZeros() + 2 * transformed.C_xi.nonZeros() +
         nx + nxi + nb + 3 * nd));
 
+    // Constant KKT blocks. These values are written once for the whole solve.
     add_sparse_block(triplets, data.Q_x, row_x, col_x);
     add_constant_diagonal(triplets, row_x, col_x, nx, options_.nu_x);
     add_transpose_block(triplets, data.A_x, row_x, col_gb);
     add_transpose_block(triplets, data.C_x, row_x, col_gd, -1.0);
 
     add_sparse_block(triplets, transformed.Q_xi, row_xi, col_xi);
-    add_sparse_block(triplets, B, row_xi, col_xi, mu);
     add_constant_diagonal(triplets, row_xi, col_xi, nxi, options_.nu_xi);
     add_transpose_block(triplets, transformed.A_xi, row_xi, col_gb);
     add_transpose_block(triplets, transformed.C_xi, row_xi, col_gd, -1.0);
@@ -163,13 +156,96 @@ SparseMatrix KKTAssembler::matrix(
     add_sparse_block(triplets, transformed.C_xi, row_ineq, col_xi);
     add_constant_diagonal(triplets, row_ineq, col_vd, nd, -1.0);
 
-    add_vector_diagonal(triplets, row_fb, col_vd, d_v, -options_.nu_d);
-    add_vector_diagonal(triplets, row_fb, col_gd, d_gamma, -options_.nu_d);
+    // -nu_d is the constant part of the two FB diagonal blocks.
+    add_constant_diagonal(triplets, row_fb, col_vd, nd, -options_.nu_d);
+    add_constant_diagonal(triplets, row_fb, col_gd, nd, -options_.nu_d);
 
-    SparseMatrix kkt(dim, dim);
-    kkt.setFromTriplets(triplets.begin(), triplets.end());
-    kkt.makeCompressed();
-    return kkt;
+    KKTWorkspace workspace;
+    workspace.matrix.resize(dim, dim);
+    workspace.matrix.setFromTriplets(triplets.begin(), triplets.end());
+
+    // Reserve the full structural pattern of the nonlinear blocks. Explicit
+    // zeros are intentional: the numerical values may switch between zero and
+    // nonzero as the D-gap region or FB generalized derivative changes.
+    for (int i = 0; i < nl; ++i) {
+        const int l = 2 * i;
+        const int e = 2 * i + 1;
+        workspace.matrix.coeffRef(row_xi + l, col_xi + l) += 0.0;
+        workspace.matrix.coeffRef(row_xi + l, col_xi + e) += 0.0;
+        workspace.matrix.coeffRef(row_xi + e, col_xi + l) += 0.0;
+        workspace.matrix.coeffRef(row_xi + e, col_xi + e) += 0.0;
+    }
+    for (int i = 0; i < nd; ++i) {
+        workspace.matrix.coeffRef(row_fb + i, col_vd + i) += 0.0;
+        workspace.matrix.coeffRef(row_fb + i, col_gd + i) += 0.0;
+    }
+    workspace.matrix.makeCompressed();
+
+    workspace.dgap_indices.resize(static_cast<std::size_t>(nl));
+    workspace.dgap_base_values.resize(static_cast<std::size_t>(nl));
+    const double* values = workspace.matrix.valuePtr();
+    for (int i = 0; i < nl; ++i) {
+        const int l = 2 * i;
+        const int e = 2 * i + 1;
+        auto& indices = workspace.dgap_indices[static_cast<std::size_t>(i)];
+        indices = {
+            value_index(workspace.matrix, row_xi + l, col_xi + l),
+            value_index(workspace.matrix, row_xi + l, col_xi + e),
+            value_index(workspace.matrix, row_xi + e, col_xi + l),
+            value_index(workspace.matrix, row_xi + e, col_xi + e)};
+
+        auto& base = workspace.dgap_base_values[static_cast<std::size_t>(i)];
+        base = {values[indices[0]], values[indices[1]], values[indices[2]], values[indices[3]]};
+    }
+
+    workspace.fb_v_indices.resize(static_cast<std::size_t>(nd));
+    workspace.fb_gamma_indices.resize(static_cast<std::size_t>(nd));
+    workspace.fb_v_base_values.resize(static_cast<std::size_t>(nd));
+    workspace.fb_gamma_base_values.resize(static_cast<std::size_t>(nd));
+    for (int i = 0; i < nd; ++i) {
+        const int v_index = value_index(workspace.matrix, row_fb + i, col_vd + i);
+        const int gamma_index = value_index(workspace.matrix, row_fb + i, col_gd + i);
+        workspace.fb_v_indices[static_cast<std::size_t>(i)] = v_index;
+        workspace.fb_gamma_indices[static_cast<std::size_t>(i)] = gamma_index;
+        workspace.fb_v_base_values[static_cast<std::size_t>(i)] = values[v_index];
+        workspace.fb_gamma_base_values[static_cast<std::size_t>(i)] = values[gamma_index];
+    }
+
+    return workspace;
+}
+
+void KKTAssembler::update_matrix(
+    KKTWorkspace& workspace,
+    double mu,
+    const Vector& xi,
+    const Vector& v_d,
+    const Vector& gamma_d) const {
+    const int nl = problem_.n_lambda;
+    const int nd = problem_.n_d;
+    if (xi.size() != transformed_dim(problem_)) {
+        throw std::invalid_argument("xi has incorrect length for KKT update");
+    }
+    if (v_d.size() != nd || gamma_d.size() != nd) {
+        throw std::invalid_argument("FB variables have incorrect length for KKT update");
+    }
+
+    double* values = workspace.matrix.valuePtr();
+    for (int i = 0; i < nl; ++i) {
+        const auto block = dgap_.modified_hessian_block(xi[2 * i], xi[2 * i + 1]);
+        const auto& indices = workspace.dgap_indices[static_cast<std::size_t>(i)];
+        const auto& base = workspace.dgap_base_values[static_cast<std::size_t>(i)];
+        values[indices[0]] = base[0] + mu * block[0];
+        values[indices[1]] = base[1] + mu * block[1];
+        values[indices[2]] = base[2] + mu * block[1];
+        values[indices[3]] = base[3] + mu * block[2];
+    }
+
+    const auto [d_v, d_gamma] = fb_.jacobian_diagonals(v_d, gamma_d);
+    for (int i = 0; i < nd; ++i) {
+        const std::size_t index = static_cast<std::size_t>(i);
+        values[workspace.fb_v_indices[index]] = workspace.fb_v_base_values[index] + d_v[i];
+        values[workspace.fb_gamma_indices[index]] = workspace.fb_gamma_base_values[index] + d_gamma[i];
+    }
 }
 
 Vector KKTAssembler::violation(
