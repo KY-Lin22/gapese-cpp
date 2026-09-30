@@ -65,47 +65,54 @@ int value_index(const SparseMatrix& matrix, int row, int col) {
 
 }  // namespace
 
-KKTAssembler::KKTAssembler(
-    ProblemSize problem,
-    Options options,
-    const DGapEvaluator& dgap,
-    const FBEvaluator& fb)
-    : problem_(problem), options_(options), dgap_(dgap), fb_(fb) {}
+KKTAssembler::KKTAssembler(ProblemSize problem, Options options)
+    : problem_(problem), options_(options) {}
 
-Vector KKTAssembler::residual(
+void KKTAssembler::residual(
     double mu,
-    const Vector& x,
-    const Vector& xi,
+    const Vector& qx_x,
+    const Vector& qxi_xi,
+    const Vector& ax_x,
+    const Vector& axi_xi,
+    const Vector& cx_x,
+    const Vector& cxi_xi,
+    const Vector& dgap_gradient,
+    const Vector& fb_value,
     const Vector& v_d,
     const Vector& gamma_b,
     const Vector& gamma_d,
     const CcqpData& data,
-    const TransformedData& transformed) const {
+    const TransformedData& transformed,
+    Vector& result) const {
     const int nx = problem_.n_x;
     const int nxi = transformed_dim(problem_);
     const int nb = problem_.n_b;
     const int nd = problem_.n_d;
 
-    Vector result(kkt_dim(problem_));
-    int offset = 0;
+    if (result.size() != kkt_dim(problem_)) {
+        result.resize(kkt_dim(problem_));
+    }
 
-    result.segment(offset, nx) =
-        data.Q_x * x + data.r_x + data.A_x.transpose() * gamma_b - data.C_x.transpose() * gamma_d;
+    int offset = 0;
+    auto stationarity_x = result.segment(offset, nx);
+    stationarity_x = qx_x + data.r_x;
+    stationarity_x.noalias() += data.A_x.transpose() * gamma_b;
+    stationarity_x.noalias() -= data.C_x.transpose() * gamma_d;
     offset += nx;
 
-    result.segment(offset, nxi) =
-        transformed.Q_xi * xi + transformed.r_xi + mu * dgap_.gradient(xi) +
-        transformed.A_xi.transpose() * gamma_b - transformed.C_xi.transpose() * gamma_d;
+    auto stationarity_xi = result.segment(offset, nxi);
+    stationarity_xi = qxi_xi + transformed.r_xi + mu * dgap_gradient;
+    stationarity_xi.noalias() += transformed.A_xi.transpose() * gamma_b;
+    stationarity_xi.noalias() -= transformed.C_xi.transpose() * gamma_d;
     offset += nxi;
 
-    result.segment(offset, nb) = data.A_x * x + transformed.A_xi * xi - data.b;
+    result.segment(offset, nb) = ax_x + axi_xi - data.b;
     offset += nb;
 
-    result.segment(offset, nd) = data.C_x * x + transformed.C_xi * xi - data.d - v_d;
+    result.segment(offset, nd) = cx_x + cxi_xi - data.d - v_d;
     offset += nd;
 
-    result.segment(offset, nd) = fb_.value(v_d, gamma_d);
-    return result;
+    result.segment(offset, nd) = fb_value;
 }
 
 KKTWorkspace KKTAssembler::initialize_matrix(
@@ -217,21 +224,21 @@ KKTWorkspace KKTAssembler::initialize_matrix(
 void KKTAssembler::update_matrix(
     KKTWorkspace& workspace,
     double mu,
-    const Vector& xi,
-    const Vector& v_d,
-    const Vector& gamma_d) const {
+    const std::vector<std::array<double, 3>>& dgap_blocks,
+    const Vector& fb_d_v,
+    const Vector& fb_d_gamma) const {
     const int nl = problem_.n_lambda;
     const int nd = problem_.n_d;
-    if (xi.size() != transformed_dim(problem_)) {
-        throw std::invalid_argument("xi has incorrect length for KKT update");
+    if (dgap_blocks.size() != static_cast<std::size_t>(nl)) {
+        throw std::invalid_argument("D-gap block count is incorrect for KKT update");
     }
-    if (v_d.size() != nd || gamma_d.size() != nd) {
-        throw std::invalid_argument("FB variables have incorrect length for KKT update");
+    if (fb_d_v.size() != nd || fb_d_gamma.size() != nd) {
+        throw std::invalid_argument("FB derivative vectors have incorrect length for KKT update");
     }
 
     double* values = workspace.matrix.valuePtr();
     for (int i = 0; i < nl; ++i) {
-        const auto block = dgap_.modified_hessian_block(xi[2 * i], xi[2 * i + 1]);
+        const auto& block = dgap_blocks[static_cast<std::size_t>(i)];
         const auto& indices = workspace.dgap_indices[static_cast<std::size_t>(i)];
         const auto& base = workspace.dgap_base_values[static_cast<std::size_t>(i)];
         values[indices[0]] = base[0] + mu * block[0];
@@ -240,31 +247,11 @@ void KKTAssembler::update_matrix(
         values[indices[3]] = base[3] + mu * block[2];
     }
 
-    const auto [d_v, d_gamma] = fb_.jacobian_diagonals(v_d, gamma_d);
     for (int i = 0; i < nd; ++i) {
         const std::size_t index = static_cast<std::size_t>(i);
-        values[workspace.fb_v_indices[index]] = workspace.fb_v_base_values[index] + d_v[i];
-        values[workspace.fb_gamma_indices[index]] = workspace.fb_gamma_base_values[index] + d_gamma[i];
+        values[workspace.fb_v_indices[index]] = workspace.fb_v_base_values[index] + fb_d_v[i];
+        values[workspace.fb_gamma_indices[index]] = workspace.fb_gamma_base_values[index] + fb_d_gamma[i];
     }
-}
-
-Vector KKTAssembler::violation(
-    const Vector& x,
-    const Vector& xi,
-    const Vector& v_d,
-    const Vector& gamma_d,
-    const CcqpData& data,
-    const TransformedData& transformed) const {
-    const int nb = problem_.n_b;
-    const int nd = problem_.n_d;
-    Vector result(nb + 2 * nd);
-    int offset = 0;
-    result.segment(offset, nb) = data.A_x * x + transformed.A_xi * xi - data.b;
-    offset += nb;
-    result.segment(offset, nd) = data.C_x * x + transformed.C_xi * xi - data.d - v_d;
-    offset += nd;
-    result.segment(offset, nd) = fb_.value(v_d, gamma_d);
-    return result;
 }
 
 }  // namespace gapese::detail

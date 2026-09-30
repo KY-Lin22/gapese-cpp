@@ -1,18 +1,16 @@
 #include "gapese/solver.hpp"
 
-#include "gapese/detail/merit.hpp"
-
 #include <Eigen/SparseLU>
 #include <Eigen/SparseQR>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
-#include <utility>
 #include <vector>
 
 namespace gapese {
@@ -38,6 +36,55 @@ void require_vector_size(const Vector& vector, int size, const char* name) {
 }
 
 using SparseLUSolver = Eigen::SparseLU<SparseMatrix, Eigen::COLAMDOrdering<int>>;
+
+struct SolverWorkspace {
+    explicit SolverWorkspace(const ProblemSize& problem)
+        : qx_x(problem.n_x),
+          qxi_xi(detail::transformed_dim(problem)),
+          ax_x(problem.n_b),
+          axi_xi(problem.n_b),
+          cx_x(problem.n_d),
+          cxi_xi(problem.n_d),
+          dgap_gradient(detail::transformed_dim(problem)),
+          dgap_blocks(static_cast<std::size_t>(problem.n_lambda)),
+          fb_value(problem.n_d),
+          fb_d_v(problem.n_d),
+          fb_d_gamma(problem.n_d),
+          kkt_residual(detail::kkt_dim(problem)),
+          rhs(detail::kkt_dim(problem)),
+          newton_step(detail::kkt_dim(problem)),
+          qx_dx(problem.n_x),
+          qxi_dxi(detail::transformed_dim(problem)),
+          x_trial(problem.n_x),
+          xi_trial(detail::transformed_dim(problem)),
+          v_d_trial(problem.n_d),
+          gamma_d_trial(problem.n_d) {}
+
+    Vector qx_x;
+    Vector qxi_xi;
+    Vector ax_x;
+    Vector axi_xi;
+    Vector cx_x;
+    Vector cxi_xi;
+
+    Vector dgap_gradient;
+    std::vector<std::array<double, 3>> dgap_blocks;
+    Vector fb_value;
+    Vector fb_d_v;
+    Vector fb_d_gamma;
+
+    Vector kkt_residual;
+    Vector rhs;
+    Vector newton_step;
+
+    Vector qx_dx;
+    Vector qxi_dxi;
+
+    Vector x_trial;
+    Vector xi_trial;
+    Vector v_d_trial;
+    Vector gamma_d_trial;
+};
 
 bool factor_and_solve_sparse_system(
     SparseLUSolver& lu,
@@ -75,7 +122,7 @@ Solver::Solver(ProblemSize problem, Options options)
       options_(options),
       dgap_(options.dgap_a, options.dgap_b),
       fb_(options.fb_sigma),
-      kkt_(problem, options, dgap_, fb_) {
+      kkt_(problem, options) {
     problem_.validate();
     options_.validate();
 
@@ -217,6 +264,8 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
     Vector gamma_b = initial.gamma_b.value_or(Vector::Ones(problem_.n_b));
     Vector gamma_d = initial.gamma_d.value_or(Vector::Ones(problem_.n_d));
 
+    SolverWorkspace workspace(problem_);
+
     double mu = options_.mu_min;
     Timing timing;
 
@@ -242,14 +291,47 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
     int iteration = 0;
     std::string message = "- Solver fails: solver terminated before setting a status";
 
+    const int nx = problem_.n_x;
+    const int nxi = detail::transformed_dim(problem_);
+    const int nb = problem_.n_b;
+    const int nd = problem_.n_d;
+    const int row_eq = nx + nxi;
+    const int row_ineq = row_eq + nb;
+
     for (int k = 0; k <= options_.max_iter; ++k) {
         iteration = k;
 
         const auto termination_start = Clock::now();
-        objective = detail::qp_objective(x, xi, data, transformed);
-        dgap_residual = dgap_.value(xi);
-        const Vector kkt_residual = kkt_.residual(mu, x, xi, v_d, gamma_b, gamma_d, data, transformed);
-        kkt_norm = kkt_residual.lpNorm<Eigen::Infinity>();
+        // Compute each sparse matrix-vector product for the current iterate once,
+        // then reuse it in the objective, KKT residual, and line search.
+        workspace.qx_x = data.Q_x * x;
+        workspace.qxi_xi = transformed.Q_xi * xi;
+        workspace.ax_x = data.A_x * x;
+        workspace.axi_xi = transformed.A_xi * xi;
+        workspace.cx_x = data.C_x * x;
+        workspace.cxi_xi = transformed.C_xi * xi;
+        dgap_.evaluate(xi, dgap_residual, workspace.dgap_gradient, workspace.dgap_blocks);
+        fb_.evaluate(v_d, gamma_d, workspace.fb_value, workspace.fb_d_v, workspace.fb_d_gamma);
+        objective =
+            0.5 * x.dot(workspace.qx_x) + data.r_x.dot(x) +
+            0.5 * xi.dot(workspace.qxi_xi) + transformed.r_xi.dot(xi);
+        kkt_.residual(
+            mu,
+            workspace.qx_x,
+            workspace.qxi_xi,
+            workspace.ax_x,
+            workspace.axi_xi,
+            workspace.cx_x,
+            workspace.cxi_xi,
+            workspace.dgap_gradient,
+            workspace.fb_value,
+            v_d,
+            gamma_b,
+            gamma_d,
+            data,
+            transformed,
+            workspace.kkt_residual);
+        kkt_norm = workspace.kkt_residual.lpNorm<Eigen::Infinity>();
 
         if (options_.print_level == 2) {
             if (k % 10 == 0) {
@@ -298,19 +380,20 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
 
         const auto search_start = Clock::now();
         const auto assembly_start = Clock::now();
-        kkt_.update_matrix(kkt_workspace, mu, xi, v_d, gamma_d);
+        kkt_.update_matrix(
+            kkt_workspace, mu, workspace.dgap_blocks, workspace.fb_d_v, workspace.fb_d_gamma);
         timing.kkt_assembly += elapsed_seconds(assembly_start);
 
-        Vector newton_step;
+        workspace.rhs = -workspace.kkt_residual;
         if (!factor_and_solve_sparse_system(
-                lu, kkt_workspace.matrix, -kkt_residual, newton_step, timing)) {
+                lu, kkt_workspace.matrix, workspace.rhs, workspace.newton_step, timing)) {
             status = 0;
             message = "- Solver fails: KKT linear solve failed";
             timing.search_direction += elapsed_seconds(search_start);
             break;
         }
 
-        newton_norm = newton_step.lpNorm<Eigen::Infinity>();
+        newton_norm = workspace.newton_step.lpNorm<Eigen::Infinity>();
         if (!std::isfinite(newton_norm) || newton_norm >= options_.newton_step_max) {
             status = 0;
             message = "- Solver fails: the Newton step is too large or non-finite";
@@ -319,23 +402,30 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
         }
 
         int offset = 0;
-        const Vector dx = newton_step.segment(offset, problem_.n_x);
-        offset += problem_.n_x;
-        const Vector dxi = newton_step.segment(offset, detail::transformed_dim(problem_));
-        offset += detail::transformed_dim(problem_);
-        const Vector dv_d = newton_step.segment(offset, problem_.n_d);
-        offset += problem_.n_d;
-        const Vector dgamma_b = newton_step.segment(offset, problem_.n_b);
-        offset += problem_.n_b;
-        const Vector dgamma_d = newton_step.segment(offset, problem_.n_d);
+        const auto dx = workspace.newton_step.segment(offset, nx);
+        offset += nx;
+        const auto dxi = workspace.newton_step.segment(offset, nxi);
+        offset += nxi;
+        const auto dv_d = workspace.newton_step.segment(offset, nd);
+        offset += nd;
+        const auto dgamma_b = workspace.newton_step.segment(offset, nb);
+        offset += nb;
+        const auto dgamma_d = workspace.newton_step.segment(offset, nd);
         timing.search_direction += elapsed_seconds(search_start);
 
         const auto line_search_start = Clock::now();
-        const double d_objective = detail::qp_directional_derivative(x, xi, dx, dxi, data, transformed);
-        const double d_dgap = dgap_.gradient(xi).dot(dxi);
-        const int violation_size = problem_.n_b + 2 * problem_.n_d;
+        workspace.qx_dx = data.Q_x * dx;
+        workspace.qxi_dxi = transformed.Q_xi * dxi;
+
+        const double d_objective =
+            workspace.qx_x.dot(dx) + data.r_x.dot(dx) +
+            workspace.qxi_xi.dot(dxi) + transformed.r_xi.dot(dxi);
+        const double objective_curvature =
+            dx.dot(workspace.qx_dx) + dxi.dot(workspace.qxi_dxi);
+        const double d_dgap = workspace.dgap_gradient.dot(dxi);
+        const int violation_size = nb + 2 * nd;
         const double violation_norm = violation_size > 0
-            ? kkt_residual.tail(violation_size).lpNorm<1>()
+            ? workspace.kkt_residual.tail(violation_size).lpNorm<1>()
             : 0.0;
 
         beta = options_.beta_init;
@@ -352,23 +442,35 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
 
         alpha = 1.0;
         line_search_status = 0;
-        Vector x_trial;
-        Vector xi_trial;
-        Vector v_d_trial;
-        Vector gamma_d_trial;
 
         while (true) {
-            x_trial = x + alpha * dx;
-            xi_trial = xi + alpha * dxi;
-            v_d_trial = v_d + alpha * dv_d;
-            gamma_d_trial = gamma_d + alpha * dgamma_d;
+            workspace.xi_trial = xi + alpha * dxi;
+            workspace.v_d_trial = v_d + alpha * dv_d;
+            workspace.gamma_d_trial = gamma_d + alpha * dgamma_d;
 
-            const double objective_trial = detail::qp_objective(x_trial, xi_trial, data, transformed);
-            const double dgap_trial = dgap_.value(xi_trial);
-            const Vector violation_trial =
-                kkt_.violation(x_trial, xi_trial, v_d_trial, gamma_d_trial, data, transformed);
+            const double objective_trial =
+                objective + alpha * d_objective +
+                0.5 * alpha * alpha * objective_curvature;
+            const double dgap_trial = dgap_.value(workspace.xi_trial);
+
+            double violation_trial_norm = 0.0;
+            // The equality/inequality trial residuals are affine in alpha.
+            // Reuse the corresponding Newton equations instead of multiplying
+            // A/C by every trial point during backtracking.
+            for (int i = 0; i < nb; ++i) {
+                const double eq_direction = -workspace.kkt_residual[row_eq + i] +
+                    options_.nu_b * dgamma_b[i];
+                const double value = workspace.kkt_residual[row_eq + i] + alpha * eq_direction;
+                violation_trial_norm += std::abs(value);
+            }
+            for (int i = 0; i < nd; ++i) {
+                const double value = (1.0 - alpha) * workspace.kkt_residual[row_ineq + i];
+                violation_trial_norm += std::abs(value);
+            }
+            violation_trial_norm += fb_.l1_norm(workspace.v_d_trial, workspace.gamma_d_trial);
+
             const double theta_trial =
-                objective_trial + mu * dgap_trial + beta * violation_trial.lpNorm<1>();
+                objective_trial + mu * dgap_trial + beta * violation_trial_norm;
 
             if (theta_trial <= theta + alpha * options_.nu_D * d_theta) {
                 line_search_status = 1;
@@ -386,13 +488,14 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
             timing.step_size += elapsed_seconds(line_search_start);
             break;
         }
-        timing.step_size += elapsed_seconds(line_search_start);
 
-        x = std::move(x_trial);
-        xi = std::move(xi_trial);
-        v_d = std::move(v_d_trial);
+        workspace.x_trial = x + alpha * dx;
+        x.swap(workspace.x_trial);
+        xi.swap(workspace.xi_trial);
+        v_d.swap(workspace.v_d_trial);
         gamma_b += alpha * dgamma_b;
-        gamma_d = std::move(gamma_d_trial);
+        gamma_d.swap(workspace.gamma_d_trial);
+        timing.step_size += elapsed_seconds(line_search_start);
     }
 
     timing.total = elapsed_seconds(total_start);

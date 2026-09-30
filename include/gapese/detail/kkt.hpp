@@ -1,7 +1,5 @@
 #pragma once
 
-#include "gapese/detail/dgap.hpp"
-#include "gapese/detail/fb.hpp"
 #include "gapese/options.hpp"
 #include "gapese/detail/types.hpp"
 
@@ -27,17 +25,24 @@ struct KKTWorkspace {
 
 class KKTAssembler {
 public:
-    KKTAssembler(ProblemSize problem, Options options, const DGapEvaluator& dgap, const FBEvaluator& fb);
+    KKTAssembler(ProblemSize problem, Options options);
 
-    Vector residual(
+    void residual(
         double mu,
-        const Vector& x,
-        const Vector& xi,
+        const Vector& qx_x,
+        const Vector& qxi_xi,
+        const Vector& ax_x,
+        const Vector& axi_xi,
+        const Vector& cx_x,
+        const Vector& cxi_xi,
+        const Vector& dgap_gradient,
+        const Vector& fb_value,
         const Vector& v_d,
         const Vector& gamma_b,
         const Vector& gamma_d,
         const CcqpData& data,
-        const TransformedData& transformed) const;
+        const TransformedData& transformed,
+        Vector& result) const;
 
     KKTWorkspace initialize_matrix(
         const CcqpData& data,
@@ -46,23 +51,13 @@ public:
     void update_matrix(
         KKTWorkspace& workspace,
         double mu,
-        const Vector& xi,
-        const Vector& v_d,
-        const Vector& gamma_d) const;
-
-    Vector violation(
-        const Vector& x,
-        const Vector& xi,
-        const Vector& v_d,
-        const Vector& gamma_d,
-        const CcqpData& data,
-        const TransformedData& transformed) const;
+        const std::vector<std::array<double, 3>>& dgap_blocks,
+        const Vector& fb_d_v,
+        const Vector& fb_d_gamma) const;
 
 private:
     ProblemSize problem_;
     Options options_;
-    const DGapEvaluator& dgap_;
-    const FBEvaluator& fb_;
 };
 
 }  // namespace gapese::detail
