@@ -50,8 +50,8 @@ classdef GapeseMex < handle
             Option.dgap_b = 10.0;
             Option.fb_sigma = 0.0;
             Option.max_iter = 500;
-            Option.tol_kkt = 1e-4;
-            Option.tol_dgap = 1e-4;
+            Option.tol_kkt = 1e-5;
+            Option.tol_dgap = 1e-6;
             Option.newton_step_max = 1e10;
             Option.mu_min = 1.0;
             Option.mu_max = 1e6;

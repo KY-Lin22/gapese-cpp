@@ -37,9 +37,9 @@ TIMING_FIELDS = (
     "total",
     "search_direction",
     "kkt_assembly",
-    "lu_analyze",
-    "lu_factorize",
-    "lu_solve",
+    "kkt_analyze",
+    "kkt_factorize",
+    "kkt_solve",
     "search_other",
 )
 
@@ -193,9 +193,9 @@ def _run_problem(name, options):
             f"total={_ms(row['total']):8.3f}  "
             f"search={_ms(row['search_direction']):8.3f}  "
             f"assembly={_ms(row['kkt_assembly']):8.3f}  "
-            f"analyze={_ms(row['lu_analyze']):8.3f}  "
-            f"factorize={_ms(row['lu_factorize']):8.3f}  "
-            f"solve={_ms(row['lu_solve']):8.3f}  "
+            f"analyze={_ms(row['kkt_analyze']):8.3f}  "
+            f"factorize={_ms(row['kkt_factorize']):8.3f}  "
+            f"solve={_ms(row['kkt_solve']):8.3f}  "
             f"other={_ms(row['search_other']):8.3f}"
         )
 
@@ -205,18 +205,18 @@ def _run_problem(name, options):
     total = med("total")
     profiled_kkt = (
         med("kkt_assembly")
-        + med("lu_analyze")
-        + med("lu_factorize")
-        + med("lu_solve")
+        + med("kkt_analyze")
+        + med("kkt_factorize")
+        + med("kkt_solve")
     )
     print(
         "  median : "
         f"total={_ms(total):8.3f}  "
         f"search={_ms(med('search_direction')):8.3f}  "
         f"assembly={_ms(med('kkt_assembly')):8.3f}  "
-        f"analyze={_ms(med('lu_analyze')):8.3f}  "
-        f"factorize={_ms(med('lu_factorize')):8.3f}  "
-        f"solve={_ms(med('lu_solve')):8.3f}  "
+        f"analyze={_ms(med('kkt_analyze')):8.3f}  "
+        f"factorize={_ms(med('kkt_factorize')):8.3f}  "
+        f"solve={_ms(med('kkt_solve')):8.3f}  "
         f"other={_ms(med('search_other')):8.3f}  "
         f"KKT/total={100.0 * profiled_kkt / total:5.1f}%"
     )

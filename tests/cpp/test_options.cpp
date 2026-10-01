@@ -112,10 +112,10 @@ int main() {
     failures += !expect_invalid("mu_update <= 1", [](gapese::Options& o) { o.mu_update = 1.0; });
 
     // Regularization and merit parameters.
-    failures += !expect_invalid("nu_x < 0", [](gapese::Options& o) { o.nu_x = -1.0; });
-    failures += !expect_invalid("nu_xi < 0", [](gapese::Options& o) { o.nu_xi = -1.0; });
-    failures += !expect_invalid("nu_b < 0", [](gapese::Options& o) { o.nu_b = -1.0; });
-    failures += !expect_invalid("nu_d < 0", [](gapese::Options& o) { o.nu_d = -1.0; });
+    failures += !expect_invalid("nu_x <= 0", [](gapese::Options& o) { o.nu_x = 0.0; });
+    failures += !expect_invalid("nu_xi <= 0", [](gapese::Options& o) { o.nu_xi = 0.0; });
+    failures += !expect_invalid("nu_b <= 0", [](gapese::Options& o) { o.nu_b = 0.0; });
+    failures += !expect_invalid("nu_d <= 0", [](gapese::Options& o) { o.nu_d = 0.0; });
     failures += !expect_invalid("beta_init <= 0", [](gapese::Options& o) { o.beta_init = 0.0; });
     failures += !expect_invalid("rho <= 0", [](gapese::Options& o) { o.rho = 0.0; });
     failures += !expect_invalid("rho >= 1", [](gapese::Options& o) { o.rho = 1.0; });

@@ -158,10 +158,10 @@ bool factor_and_solve_qdldl(
     Timing& timing) {
     auto phase_start = Clock::now();
     if (!ldl.factorize(matrix)) {
-        timing.lu_factorize += elapsed_seconds(phase_start);
+        timing.kkt_factorize += elapsed_seconds(phase_start);
         return false;
     }
-    timing.lu_factorize += elapsed_seconds(phase_start);
+    timing.kkt_factorize += elapsed_seconds(phase_start);
 
     phase_start = Clock::now();
     const int n = static_cast<int>(old_to_new.size());
@@ -172,7 +172,7 @@ bool factor_and_solve_qdldl(
     for (int old_index = 0; old_index < n; ++old_index) {
         solution[old_index] = permuted_rhs[old_to_new[static_cast<std::size_t>(old_index)]];
     }
-    timing.lu_solve += elapsed_seconds(phase_start);
+    timing.kkt_solve += elapsed_seconds(phase_start);
     return solution.allFinite();
 }
 
@@ -340,7 +340,7 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
     if (!ldl.analyze_pattern(kkt_workspace.matrix)) {
         throw std::runtime_error("QDLDL symbolic analysis failed for reduced KKT matrix");
     }
-    timing.lu_analyze += elapsed_seconds(analyze_start);
+    timing.kkt_analyze += elapsed_seconds(analyze_start);
     timing.search_direction += elapsed_seconds(initial_kkt_start);
 
     double newton_norm = std::numeric_limits<double>::quiet_NaN();
@@ -579,8 +579,8 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
     timing.total = elapsed_seconds(total_start);
     timing.search_other = std::max(
         0.0,
-        timing.search_direction - timing.kkt_assembly - timing.lu_analyze -
-            timing.lu_factorize - timing.lu_solve);
+        timing.search_direction - timing.kkt_assembly - timing.kkt_analyze -
+            timing.kkt_factorize - timing.kkt_solve);
     timing.other = std::max(0.0, timing.total - timing.check_termination - timing.search_direction - timing.step_size);
 
     SolveResult result;

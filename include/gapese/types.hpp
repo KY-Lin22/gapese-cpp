@@ -62,9 +62,9 @@ struct Timing {
     double check_termination = 0.0;
     double search_direction = 0.0;
     double kkt_assembly = 0.0;
-    double lu_analyze = 0.0;
-    double lu_factorize = 0.0;
-    double lu_solve = 0.0;
+    double kkt_analyze = 0.0;
+    double kkt_factorize = 0.0;
+    double kkt_solve = 0.0;
     double search_other = 0.0;
     double step_size = 0.0;
     double other = 0.0;

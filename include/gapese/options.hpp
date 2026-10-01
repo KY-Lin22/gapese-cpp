@@ -14,8 +14,8 @@ struct Options {
     double fb_sigma = 0.0;
 
     int max_iter = 500;
-    double tol_kkt = 1e-4;
-    double tol_dgap = 1e-4;
+    double tol_kkt = 1e-5;
+    double tol_dgap = 1e-6;
     double newton_step_max = 1e10;
 
     double mu_min = 1.0;
@@ -80,8 +80,8 @@ struct Options {
         if (mu_update <= 1.0) {
             throw std::invalid_argument("mu_update must be greater than 1");
         }
-        if (nu_x < 0.0 || nu_xi < 0.0 || nu_b < 0.0 || nu_d < 0.0) {
-            throw std::invalid_argument("regularization parameters must be nonnegative");
+        if (nu_x <= 0.0 || nu_xi <= 0.0 || nu_b <= 0.0 || nu_d <= 0.0) {
+            throw std::invalid_argument("regularization parameters must be positive");
         }
         if (beta_init <= 0.0) {
             throw std::invalid_argument("beta_init must be positive");
