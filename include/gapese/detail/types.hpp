@@ -19,4 +19,8 @@ inline int kkt_dim(const ProblemSize& problem) noexcept {
     return problem.n_x + transformed_dim(problem) + problem.n_b + 2 * problem.n_d;
 }
 
+inline int reduced_kkt_dim(const ProblemSize& problem) noexcept {
+    return problem.n_x + transformed_dim(problem) + problem.n_b + problem.n_d;
+}
+
 }  // namespace gapese::detail

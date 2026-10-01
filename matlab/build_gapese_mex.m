@@ -41,10 +41,12 @@ sources = {
     fullfile(root_dir, 'src', 'kkt.cpp')
     fullfile(root_dir, 'src', 'merit.cpp')
     fullfile(root_dir, 'src', 'solver.cpp')
+    fullfile(root_dir, 'third_party', 'qdldl', 'src', 'qdldl.c')
     };
 
 include_root = ['-I', fullfile(root_dir, 'include')];
 include_eigen = ['-I', eigen_dir];
+include_qdldl = ['-I', fullfile(root_dir, 'third_party', 'qdldl', 'include')];
 
 if ispc
     compiler_flag = 'COMPFLAGS=$COMPFLAGS /std:c++17 /O2 /DNDEBUG';
@@ -56,7 +58,7 @@ old_dir = pwd;
 cleanup = onCleanup(@() cd(old_dir));
 cd(this_dir);
 
-mex('-R2018a', compiler_flag, include_root, include_eigen, ...
+mex('-R2018a', compiler_flag, include_root, include_eigen, include_qdldl, ...
     sources{:}, '-output', 'gapese_mex');
 
 fprintf('Built %s\n', fullfile(this_dir, ['gapese_mex.', mexext]));

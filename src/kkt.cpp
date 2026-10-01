@@ -1,13 +1,16 @@
 #include "gapese/detail/kkt.hpp"
 
+#include <Eigen/OrderingMethods>
+
 #include <algorithm>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace gapese::detail {
 namespace {
 
-void add_sparse_block(
+void add_upper_sparse_block(
     std::vector<Triplet>& triplets,
     const SparseMatrix& matrix,
     int row_offset,
@@ -15,9 +18,11 @@ void add_sparse_block(
     double scale = 1.0) {
     for (int col = 0; col < matrix.outerSize(); ++col) {
         for (SparseMatrix::InnerIterator it(matrix, col); it; ++it) {
+            const int row = row_offset + it.row();
+            const int out_col = col_offset + it.col();
             const double value = scale * it.value();
-            if (value != 0.0) {
-                triplets.emplace_back(row_offset + it.row(), col_offset + it.col(), value);
+            if (row <= out_col && value != 0.0) {
+                triplets.emplace_back(row, out_col, value);
             }
         }
     }
@@ -41,13 +46,12 @@ void add_transpose_block(
 
 void add_constant_diagonal(
     std::vector<Triplet>& triplets,
-    int row_offset,
-    int col_offset,
+    int offset,
     int size,
     double value) {
     if (value == 0.0) return;
     for (int i = 0; i < size; ++i) {
-        triplets.emplace_back(row_offset + i, col_offset + i, value);
+        triplets.emplace_back(offset + i, offset + i, value);
     }
 }
 
@@ -61,6 +65,16 @@ int value_index(const SparseMatrix& matrix, int row, int col) {
         throw std::logic_error("KKT structural entry was not reserved");
     }
     return begin + static_cast<int>(position - first);
+}
+
+std::pair<int, int> permuted_upper_coordinate(
+    const std::vector<int>& old_to_new,
+    int row,
+    int col) {
+    int new_row = old_to_new[static_cast<std::size_t>(row)];
+    int new_col = old_to_new[static_cast<std::size_t>(col)];
+    if (new_row > new_col) std::swap(new_row, new_col);
+    return {new_row, new_col};
 }
 
 }  // namespace
@@ -123,99 +137,122 @@ KKTWorkspace KKTAssembler::initialize_matrix(
     const int nb = problem_.n_b;
     const int nd = problem_.n_d;
     const int nl = problem_.n_lambda;
-    const int dim = kkt_dim(problem_);
+    const int dim = reduced_kkt_dim(problem_);
 
-    const int col_x = 0;
-    const int col_xi = col_x + nx;
-    const int col_vd = col_xi + nxi;
-    const int col_gb = col_vd + nd;
-    const int col_gd = col_gb + nb;
-
-    const int row_x = 0;
-    const int row_xi = row_x + nx;
-    const int row_eq = row_xi + nxi;
-    const int row_ineq = row_eq + nb;
-    const int row_fb = row_ineq + nd;
+    const int off_x = 0;
+    const int off_xi = off_x + nx;
+    const int off_gb = off_xi + nxi;
+    const int off_gd = off_gb + nb;
 
     std::vector<Triplet> triplets;
     triplets.reserve(static_cast<std::size_t>(
         data.Q_x.nonZeros() + transformed.Q_xi.nonZeros() +
-        2 * data.A_x.nonZeros() + 2 * transformed.A_xi.nonZeros() +
-        2 * data.C_x.nonZeros() + 2 * transformed.C_xi.nonZeros() +
-        nx + nxi + nb + 3 * nd));
+        data.A_x.nonZeros() + transformed.A_xi.nonZeros() +
+        data.C_x.nonZeros() + transformed.C_xi.nonZeros() +
+        nx + nxi + nb + nd + 3 * nl));
 
-    // Constant KKT blocks. These values are written once for the whole solve.
-    add_sparse_block(triplets, data.Q_x, row_x, col_x);
-    add_constant_diagonal(triplets, row_x, col_x, nx, options_.nu_x);
-    add_transpose_block(triplets, data.A_x, row_x, col_gb);
-    add_transpose_block(triplets, data.C_x, row_x, col_gd, -1.0);
+    // Store only the upper triangle of the symmetric reduced KKT matrix.
+    add_upper_sparse_block(triplets, data.Q_x, off_x, off_x);
+    add_constant_diagonal(triplets, off_x, nx, options_.nu_x);
+    add_transpose_block(triplets, data.A_x, off_x, off_gb);
+    add_transpose_block(triplets, data.C_x, off_x, off_gd, -1.0);
 
-    add_sparse_block(triplets, transformed.Q_xi, row_xi, col_xi);
-    add_constant_diagonal(triplets, row_xi, col_xi, nxi, options_.nu_xi);
-    add_transpose_block(triplets, transformed.A_xi, row_xi, col_gb);
-    add_transpose_block(triplets, transformed.C_xi, row_xi, col_gd, -1.0);
+    add_upper_sparse_block(triplets, transformed.Q_xi, off_xi, off_xi);
+    add_constant_diagonal(triplets, off_xi, nxi, options_.nu_xi);
+    add_transpose_block(triplets, transformed.A_xi, off_xi, off_gb);
+    add_transpose_block(triplets, transformed.C_xi, off_xi, off_gd, -1.0);
 
-    add_sparse_block(triplets, data.A_x, row_eq, col_x);
-    add_sparse_block(triplets, transformed.A_xi, row_eq, col_xi);
-    add_constant_diagonal(triplets, row_eq, col_gb, nb, -options_.nu_b);
+    add_constant_diagonal(triplets, off_gb, nb, -options_.nu_b);
 
-    add_sparse_block(triplets, data.C_x, row_ineq, col_x);
-    add_sparse_block(triplets, transformed.C_xi, row_ineq, col_xi);
-    add_constant_diagonal(triplets, row_ineq, col_vd, nd, -1.0);
+    SparseMatrix unpermuted(dim, dim);
+    unpermuted.setFromTriplets(triplets.begin(), triplets.end());
 
-    // -nu_d is the constant part of the two FB diagonal blocks.
-    add_constant_diagonal(triplets, row_fb, col_vd, nd, -options_.nu_d);
-    add_constant_diagonal(triplets, row_fb, col_gd, nd, -options_.nu_d);
-
-    KKTWorkspace workspace;
-    workspace.matrix.resize(dim, dim);
-    workspace.matrix.setFromTriplets(triplets.begin(), triplets.end());
-
-    // Reserve the full structural pattern of the nonlinear blocks. Explicit
-    // zeros are intentional: the numerical values may switch between zero and
-    // nonzero as the D-gap region or FB generalized derivative changes.
+    // Reserve all diagonals and the complete nonlinear structural pattern.
+    for (int i = 0; i < dim; ++i) {
+        unpermuted.coeffRef(i, i) += 0.0;
+    }
     for (int i = 0; i < nl; ++i) {
-        const int l = 2 * i;
-        const int e = 2 * i + 1;
-        workspace.matrix.coeffRef(row_xi + l, col_xi + l) += 0.0;
-        workspace.matrix.coeffRef(row_xi + l, col_xi + e) += 0.0;
-        workspace.matrix.coeffRef(row_xi + e, col_xi + l) += 0.0;
-        workspace.matrix.coeffRef(row_xi + e, col_xi + e) += 0.0;
+        const int l = off_xi + 2 * i;
+        const int e = l + 1;
+        unpermuted.coeffRef(l, l) += 0.0;
+        unpermuted.coeffRef(l, e) += 0.0;
+        unpermuted.coeffRef(e, e) += 0.0;
     }
     for (int i = 0; i < nd; ++i) {
-        workspace.matrix.coeffRef(row_fb + i, col_vd + i) += 0.0;
-        workspace.matrix.coeffRef(row_fb + i, col_gd + i) += 0.0;
+        unpermuted.coeffRef(off_gd + i, off_gd + i) += 0.0;
     }
+    unpermuted.makeCompressed();
+
+    // AMD sees the complete symmetric structural pattern. Values are all one
+    // so explicit structural zeros from the nonlinear blocks are preserved.
+    std::vector<Triplet> pattern_triplets;
+    pattern_triplets.reserve(static_cast<std::size_t>(
+        2 * unpermuted.nonZeros() - dim));
+    for (int col = 0; col < unpermuted.outerSize(); ++col) {
+        for (SparseMatrix::InnerIterator it(unpermuted, col); it; ++it) {
+            pattern_triplets.emplace_back(it.row(), it.col(), 1.0);
+            if (it.row() != it.col()) {
+                pattern_triplets.emplace_back(it.col(), it.row(), 1.0);
+            }
+        }
+    }
+    SparseMatrix symmetric_pattern(dim, dim);
+    symmetric_pattern.setFromTriplets(pattern_triplets.begin(), pattern_triplets.end());
+    symmetric_pattern.makeCompressed();
+
+    // Eigen ordering functors return the inverse permutation (see
+    // SimplicialCholeskyBase::ordering).  QDLDL factors P K P^T, so convert
+    // AMD's output to the forward old-to-new permutation used below.
+    Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic, int> inverse_permutation(dim);
+    Eigen::AMDOrdering<int> ordering;
+    ordering(symmetric_pattern, inverse_permutation);
+    Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic, int> permutation =
+        inverse_permutation.inverse();
+
+    KKTWorkspace workspace;
+    workspace.old_to_new.resize(static_cast<std::size_t>(dim));
+    for (int old_index = 0; old_index < dim; ++old_index) {
+        workspace.old_to_new[static_cast<std::size_t>(old_index)] = permutation.indices()[old_index];
+    }
+
+    std::vector<Triplet> permuted_triplets;
+    permuted_triplets.reserve(static_cast<std::size_t>(unpermuted.nonZeros()));
+    for (int col = 0; col < unpermuted.outerSize(); ++col) {
+        for (SparseMatrix::InnerIterator it(unpermuted, col); it; ++it) {
+            auto coordinate = permuted_upper_coordinate(workspace.old_to_new, it.row(), it.col());
+            permuted_triplets.emplace_back(coordinate.first, coordinate.second, it.value());
+        }
+    }
+    workspace.matrix.resize(dim, dim);
+    workspace.matrix.setFromTriplets(permuted_triplets.begin(), permuted_triplets.end());
     workspace.matrix.makeCompressed();
 
     workspace.dgap_indices.resize(static_cast<std::size_t>(nl));
     workspace.dgap_base_values.resize(static_cast<std::size_t>(nl));
     const double* values = workspace.matrix.valuePtr();
     for (int i = 0; i < nl; ++i) {
-        const int l = 2 * i;
-        const int e = 2 * i + 1;
+        const int l = off_xi + 2 * i;
+        const int e = l + 1;
+        const auto ll = permuted_upper_coordinate(workspace.old_to_new, l, l);
+        const auto le = permuted_upper_coordinate(workspace.old_to_new, l, e);
+        const auto ee = permuted_upper_coordinate(workspace.old_to_new, e, e);
+
         auto& indices = workspace.dgap_indices[static_cast<std::size_t>(i)];
         indices = {
-            value_index(workspace.matrix, row_xi + l, col_xi + l),
-            value_index(workspace.matrix, row_xi + l, col_xi + e),
-            value_index(workspace.matrix, row_xi + e, col_xi + l),
-            value_index(workspace.matrix, row_xi + e, col_xi + e)};
+            value_index(workspace.matrix, ll.first, ll.second),
+            value_index(workspace.matrix, le.first, le.second),
+            value_index(workspace.matrix, ee.first, ee.second)};
 
         auto& base = workspace.dgap_base_values[static_cast<std::size_t>(i)];
-        base = {values[indices[0]], values[indices[1]], values[indices[2]], values[indices[3]]};
+        base = {values[indices[0]], values[indices[1]], values[indices[2]]};
     }
 
-    workspace.fb_v_indices.resize(static_cast<std::size_t>(nd));
-    workspace.fb_gamma_indices.resize(static_cast<std::size_t>(nd));
-    workspace.fb_v_base_values.resize(static_cast<std::size_t>(nd));
-    workspace.fb_gamma_base_values.resize(static_cast<std::size_t>(nd));
+    workspace.fb_diag_indices.resize(static_cast<std::size_t>(nd));
     for (int i = 0; i < nd; ++i) {
-        const int v_index = value_index(workspace.matrix, row_fb + i, col_vd + i);
-        const int gamma_index = value_index(workspace.matrix, row_fb + i, col_gd + i);
-        workspace.fb_v_indices[static_cast<std::size_t>(i)] = v_index;
-        workspace.fb_gamma_indices[static_cast<std::size_t>(i)] = gamma_index;
-        workspace.fb_v_base_values[static_cast<std::size_t>(i)] = values[v_index];
-        workspace.fb_gamma_base_values[static_cast<std::size_t>(i)] = values[gamma_index];
+        const auto diagonal = permuted_upper_coordinate(
+            workspace.old_to_new, off_gd + i, off_gd + i);
+        workspace.fb_diag_indices[static_cast<std::size_t>(i)] =
+            value_index(workspace.matrix, diagonal.first, diagonal.second);
     }
 
     return workspace;
@@ -243,14 +280,44 @@ void KKTAssembler::update_matrix(
         const auto& base = workspace.dgap_base_values[static_cast<std::size_t>(i)];
         values[indices[0]] = base[0] + mu * block[0];
         values[indices[1]] = base[1] + mu * block[1];
-        values[indices[2]] = base[2] + mu * block[1];
-        values[indices[3]] = base[3] + mu * block[2];
+        values[indices[2]] = base[2] + mu * block[2];
     }
 
     for (int i = 0; i < nd; ++i) {
-        const std::size_t index = static_cast<std::size_t>(i);
-        values[workspace.fb_v_indices[index]] = workspace.fb_v_base_values[index] + fb_d_v[i];
-        values[workspace.fb_gamma_indices[index]] = workspace.fb_gamma_base_values[index] + fb_d_gamma[i];
+        const double d_v = fb_d_v[i] - options_.nu_d;
+        const double d_gamma = fb_d_gamma[i] - options_.nu_d;
+        values[workspace.fb_diag_indices[static_cast<std::size_t>(i)]] = -d_gamma / d_v;
+    }
+}
+
+void KKTAssembler::reduced_rhs(
+    const Vector& full_residual,
+    const Vector& fb_d_v,
+    Vector& rhs) const {
+    const int nx = problem_.n_x;
+    const int nxi = transformed_dim(problem_);
+    const int nb = problem_.n_b;
+    const int nd = problem_.n_d;
+    const int row_eq = nx + nxi;
+    const int row_ineq = row_eq + nb;
+    const int row_fb = row_ineq + nd;
+
+    if (full_residual.size() != kkt_dim(problem_)) {
+        throw std::invalid_argument("Full KKT residual has incorrect length");
+    }
+    if (fb_d_v.size() != nd) {
+        throw std::invalid_argument("FB derivative vector has incorrect length");
+    }
+    if (rhs.size() != reduced_kkt_dim(problem_)) {
+        rhs.resize(reduced_kkt_dim(problem_));
+    }
+
+    rhs.segment(0, nx + nxi) = -full_residual.segment(0, nx + nxi);
+    rhs.segment(nx + nxi, nb) = -full_residual.segment(row_eq, nb);
+    for (int i = 0; i < nd; ++i) {
+        const double d_v = fb_d_v[i] - options_.nu_d;
+        rhs[nx + nxi + nb + i] =
+            full_residual[row_ineq + i] + full_residual[row_fb + i] / d_v;
     }
 }
 

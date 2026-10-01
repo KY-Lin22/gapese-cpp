@@ -169,13 +169,17 @@ def _ms(seconds):
 
 def _run_problem(name, options):
     problem_size, ccqp, initial = _load_problem(name)
-    kkt_dim = (
+    full_kkt_dim = (
         problem_size["n_x"]
         + 2 * problem_size["n_lambda"]
         + problem_size["n_b"]
         + 2 * problem_size["n_d"]
     )
-    print(f"\n[{name}] KKT dimension = {kkt_dim}")
+    reduced_kkt_dim = full_kkt_dim - problem_size["n_d"]
+    print(
+        f"\n[{name}] reduced KKT dimension = {reduced_kkt_dim} "
+        f"(full = {full_kkt_dim})"
+    )
 
     for _ in range(WARMUP):
         _solve_once(problem_size, ccqp, initial, options)

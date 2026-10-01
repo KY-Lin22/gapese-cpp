@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(gapese_cpp VERSION 0.1.0 LANGUAGES CXX)
+project(gapese_cpp VERSION 0.1.0 LANGUAGES C CXX)
 
 # CMake 3.24+ prefers extraction-time timestamps for URL-based FetchContent.
 # Guard the policy so the project remains compatible with CMake 3.18.
@@ -66,7 +66,8 @@ add_library(gapese_core STATIC
     src/fb.cpp
     src/kkt.cpp
     src/merit.cpp
-    src/solver.cpp)
+    src/solver.cpp
+    third_party/qdldl/src/qdldl.c)
 add_library(gapese::core ALIAS gapese_core)
 add_library(gapese::gapese ALIAS gapese_core)
 
@@ -74,7 +75,9 @@ target_compile_features(gapese_core PUBLIC cxx_std_17)
 target_include_directories(gapese_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qdldl/include)
 target_link_libraries(gapese_core PUBLIC Eigen3::Eigen)
 set_target_properties(gapese_core PROPERTIES
     CXX_EXTENSIONS OFF
@@ -143,6 +146,10 @@ if(GAPESE_INSTALL)
         COMPONENT Development)
     install(FILES LICENSE
         DESTINATION "${CMAKE_INSTALL_DATADIR}/gapese"
+        COMPONENT Development)
+    install(FILES third_party/qdldl/LICENSE
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/gapese/licenses"
+        RENAME QDLDL-LICENSE
         COMPONENT Development)
 
     configure_package_config_file(

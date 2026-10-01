@@ -1,7 +1,6 @@
 #include "gapese/solver.hpp"
 
-#include <Eigen/SparseLU>
-#include <Eigen/SparseQR>
+#include "qdldl.h"
 
 #include <algorithm>
 #include <array>
@@ -11,10 +10,14 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace gapese {
 namespace {
+
+static_assert(std::is_same_v<QDLDL_int, SparseMatrix::StorageIndex>);
+static_assert(std::is_same_v<QDLDL_float, double>);
 
 using Clock = std::chrono::steady_clock;
 
@@ -35,7 +38,58 @@ void require_vector_size(const Vector& vector, int size, const char* name) {
     }
 }
 
-using SparseLUSolver = Eigen::SparseLU<SparseMatrix, Eigen::COLAMDOrdering<int>>;
+class QDLDLSolver {
+public:
+    bool analyze_pattern(const SparseMatrix& matrix) {
+        if (matrix.rows() != matrix.cols() || !matrix.isCompressed()) return false;
+        n_ = matrix.cols();
+        etree_.resize(static_cast<std::size_t>(n_));
+        lnz_.resize(static_cast<std::size_t>(n_));
+        lp_.resize(static_cast<std::size_t>(n_ + 1));
+        d_.resize(static_cast<std::size_t>(n_));
+        dinv_.resize(static_cast<std::size_t>(n_));
+        iwork_.resize(static_cast<std::size_t>(3 * n_));
+        bwork_.resize(static_cast<std::size_t>(n_));
+        fwork_.resize(static_cast<std::size_t>(n_));
+
+        const QDLDL_int sum_lnz = QDLDL_etree(
+            n_, matrix.outerIndexPtr(), matrix.innerIndexPtr(),
+            iwork_.data(), lnz_.data(), etree_.data());
+        if (sum_lnz < 0) return false;
+
+        li_.resize(static_cast<std::size_t>(sum_lnz));
+        lx_.resize(static_cast<std::size_t>(sum_lnz));
+        analyzed_ = true;
+        return true;
+    }
+
+    bool factorize(const SparseMatrix& matrix) {
+        if (!analyzed_ || matrix.cols() != n_) return false;
+        const QDLDL_int status = QDLDL_factor(
+            n_, matrix.outerIndexPtr(), matrix.innerIndexPtr(), matrix.valuePtr(),
+            lp_.data(), li_.data(), lx_.data(), d_.data(), dinv_.data(),
+            lnz_.data(), etree_.data(), bwork_.data(), iwork_.data(), fwork_.data());
+        return status >= 0;
+    }
+
+    void solve_in_place(Vector& rhs) const {
+        QDLDL_solve(n_, lp_.data(), li_.data(), lx_.data(), dinv_.data(), rhs.data());
+    }
+
+private:
+    int n_ = 0;
+    bool analyzed_ = false;
+    std::vector<QDLDL_int> etree_;
+    std::vector<QDLDL_int> lnz_;
+    std::vector<QDLDL_int> lp_;
+    std::vector<QDLDL_int> li_;
+    std::vector<QDLDL_float> lx_;
+    std::vector<QDLDL_float> d_;
+    std::vector<QDLDL_float> dinv_;
+    std::vector<QDLDL_int> iwork_;
+    std::vector<QDLDL_bool> bwork_;
+    std::vector<QDLDL_float> fwork_;
+};
 
 struct SolverWorkspace {
     explicit SolverWorkspace(const ProblemSize& problem)
@@ -51,8 +105,12 @@ struct SolverWorkspace {
           fb_d_v(problem.n_d),
           fb_d_gamma(problem.n_d),
           kkt_residual(detail::kkt_dim(problem)),
-          rhs(detail::kkt_dim(problem)),
-          newton_step(detail::kkt_dim(problem)),
+          rhs(detail::reduced_kkt_dim(problem)),
+          newton_step(detail::reduced_kkt_dim(problem)),
+          permuted_rhs(detail::reduced_kkt_dim(problem)),
+          dv_d(problem.n_d),
+          cx_dx(problem.n_d),
+          cxi_dxi(problem.n_d),
           qx_dx(problem.n_x),
           qxi_dxi(detail::transformed_dim(problem)),
           x_trial(problem.n_x),
@@ -76,6 +134,10 @@ struct SolverWorkspace {
     Vector kkt_residual;
     Vector rhs;
     Vector newton_step;
+    Vector permuted_rhs;
+    Vector dv_d;
+    Vector cx_dx;
+    Vector cxi_dxi;
 
     Vector qx_dx;
     Vector qxi_dxi;
@@ -86,33 +148,32 @@ struct SolverWorkspace {
     Vector gamma_d_trial;
 };
 
-bool factor_and_solve_sparse_system(
-    SparseLUSolver& lu,
+bool factor_and_solve_qdldl(
+    QDLDLSolver& ldl,
     const SparseMatrix& matrix,
+    const std::vector<int>& old_to_new,
     const Vector& rhs,
+    Vector& permuted_rhs,
     Vector& solution,
     Timing& timing) {
     auto phase_start = Clock::now();
-    lu.factorize(matrix);
-    timing.lu_factorize += elapsed_seconds(phase_start);
-    if (lu.info() == Eigen::Success) {
-        phase_start = Clock::now();
-        solution = lu.solve(rhs);
-        timing.lu_solve += elapsed_seconds(phase_start);
-        if (lu.info() == Eigen::Success && solution.allFinite()) {
-            return true;
-        }
-    }
-
-    // Robust fallback for singular or nearly singular Newton systems.
-    // Its cost is intentionally included in Timing::search_other.
-    Eigen::SparseQR<SparseMatrix, Eigen::COLAMDOrdering<int>> qr;
-    qr.compute(matrix);
-    if (qr.info() != Eigen::Success) {
+    if (!ldl.factorize(matrix)) {
+        timing.lu_factorize += elapsed_seconds(phase_start);
         return false;
     }
-    solution = qr.solve(rhs);
-    return qr.info() == Eigen::Success && solution.allFinite();
+    timing.lu_factorize += elapsed_seconds(phase_start);
+
+    phase_start = Clock::now();
+    const int n = static_cast<int>(old_to_new.size());
+    for (int old_index = 0; old_index < n; ++old_index) {
+        permuted_rhs[old_to_new[static_cast<std::size_t>(old_index)]] = rhs[old_index];
+    }
+    ldl.solve_in_place(permuted_rhs);
+    for (int old_index = 0; old_index < n; ++old_index) {
+        solution[old_index] = permuted_rhs[old_to_new[static_cast<std::size_t>(old_index)]];
+    }
+    timing.lu_solve += elapsed_seconds(phase_start);
+    return solution.allFinite();
 }
 
 }  // namespace
@@ -274,9 +335,11 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
     detail::KKTWorkspace kkt_workspace = kkt_.initialize_matrix(data, transformed);
     timing.kkt_assembly += elapsed_seconds(initial_assembly_start);
 
-    SparseLUSolver lu;
+    QDLDLSolver ldl;
     const auto analyze_start = Clock::now();
-    lu.analyzePattern(kkt_workspace.matrix);
+    if (!ldl.analyze_pattern(kkt_workspace.matrix)) {
+        throw std::runtime_error("QDLDL symbolic analysis failed for reduced KKT matrix");
+    }
     timing.lu_analyze += elapsed_seconds(analyze_start);
     timing.search_direction += elapsed_seconds(initial_kkt_start);
 
@@ -384,19 +447,17 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
             kkt_workspace, mu, workspace.dgap_blocks, workspace.fb_d_v, workspace.fb_d_gamma);
         timing.kkt_assembly += elapsed_seconds(assembly_start);
 
-        workspace.rhs = -workspace.kkt_residual;
-        if (!factor_and_solve_sparse_system(
-                lu, kkt_workspace.matrix, workspace.rhs, workspace.newton_step, timing)) {
+        kkt_.reduced_rhs(workspace.kkt_residual, workspace.fb_d_v, workspace.rhs);
+        if (!factor_and_solve_qdldl(
+                ldl,
+                kkt_workspace.matrix,
+                kkt_workspace.old_to_new,
+                workspace.rhs,
+                workspace.permuted_rhs,
+                workspace.newton_step,
+                timing)) {
             status = 0;
-            message = "- Solver fails: KKT linear solve failed";
-            timing.search_direction += elapsed_seconds(search_start);
-            break;
-        }
-
-        newton_norm = workspace.newton_step.lpNorm<Eigen::Infinity>();
-        if (!std::isfinite(newton_norm) || newton_norm >= options_.newton_step_max) {
-            status = 0;
-            message = "- Solver fails: the Newton step is too large or non-finite";
+            message = "- Solver fails: reduced KKT LDL solve failed";
             timing.search_direction += elapsed_seconds(search_start);
             break;
         }
@@ -406,11 +467,28 @@ SolveResult Solver::solve(const CcqpData& data, const InitialGuess& initial) {
         offset += nx;
         const auto dxi = workspace.newton_step.segment(offset, nxi);
         offset += nxi;
-        const auto dv_d = workspace.newton_step.segment(offset, nd);
-        offset += nd;
         const auto dgamma_b = workspace.newton_step.segment(offset, nb);
         offset += nb;
         const auto dgamma_d = workspace.newton_step.segment(offset, nd);
+
+        // Recover the eliminated inequality-slack Newton step from (23):
+        // dv_d = C_x dx + C_xi dxi + T_d.
+        workspace.cx_dx = data.C_x * dx;
+        workspace.cxi_dxi = transformed.C_xi * dxi;
+        workspace.dv_d = workspace.cx_dx + workspace.cxi_dxi +
+            workspace.kkt_residual.segment(row_ineq, nd);
+
+        newton_norm = std::max(
+            workspace.newton_step.lpNorm<Eigen::Infinity>(),
+            workspace.dv_d.lpNorm<Eigen::Infinity>());
+        if (!std::isfinite(newton_norm) || newton_norm >= options_.newton_step_max) {
+            status = 0;
+            message = "- Solver fails: the Newton step is too large or non-finite";
+            timing.search_direction += elapsed_seconds(search_start);
+            break;
+        }
+
+        const auto& dv_d = workspace.dv_d;
         timing.search_direction += elapsed_seconds(search_start);
 
         const auto line_search_start = Clock::now();
