@@ -81,6 +81,10 @@ Minimal examples are provided for all supported interfaces:
 - [Python](examples/python/simple_ccqp.py)
 - [MATLAB](examples/matlab/simple_ccqp.m)
 
+## Robotics application
+
+- [gapese-mujoco](https://github.com/KY-Lin22/gapese-mujoco) — a robotics application of Gapese using MuJoCo.
+
 ## Documentation
 
 Detailed algorithm and interface documentation will be added under `docs/`.

@@ -13,7 +13,7 @@ struct Options {
     double dgap_b = 10.0;
     double fb_sigma = 0.0;
 
-    int max_iter = 500;
+    int max_iter = 1000;
     double tol_kkt = 1e-5;
     double tol_dgap = 1e-6;
     double newton_step_max = 1e10;
@@ -22,15 +22,15 @@ struct Options {
     double mu_max = 1e6;
     double mu_update = 2.0;
 
-    double nu_x = 1e-8;
-    double nu_xi = 1e-8;
-    double nu_b = 1e-8;
-    double nu_d = 1e-8;
+    double nu_x = 1e-6;
+    double nu_xi = 1e-6;
+    double nu_b = 1e-6;
+    double nu_d = 1e-6;
 
     double beta_init = 1.0;
     double rho = 0.1;
     double alpha_min = 1e-16;
-    double nu_alpha = 0.5;
+    double nu_alpha = 0.8;
     double nu_D = 1e-4;
 
     void validate() const {

@@ -49,21 +49,21 @@ classdef GapeseMex < handle
             Option.dgap_a = 0.1;
             Option.dgap_b = 10.0;
             Option.fb_sigma = 0.0;
-            Option.max_iter = 500;
+            Option.max_iter = 1000;
             Option.tol_kkt = 1e-5;
             Option.tol_dgap = 1e-6;
             Option.newton_step_max = 1e10;
             Option.mu_min = 1.0;
             Option.mu_max = 1e6;
             Option.mu_update = 2.0;
-            Option.nu_x = 1e-8;
-            Option.nu_xi = 1e-8;
-            Option.nu_b = 1e-8;
-            Option.nu_d = 1e-8;
+            Option.nu_x = 1e-6;
+            Option.nu_xi = 1e-6;
+            Option.nu_b = 1e-6;
+            Option.nu_d = 1e-6;
             Option.beta_init = 1.0;
             Option.rho = 0.1;
             Option.alpha_min = 1e-16;
-            Option.nu_alpha = 0.5;
+            Option.nu_alpha = 0.8;
             Option.nu_D = 1e-4;
         end
     end
