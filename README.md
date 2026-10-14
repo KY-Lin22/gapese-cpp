@@ -1,6 +1,6 @@
 # Gapese
 
-Gapese (GAp PEnalty SEmismooth) is a C++17 solver for complementarity-constrained quadratic programming (CCQP), based on a D-gap penalty reformulation and a semismooth Newton-type method.
+Gapese (GAp PEnalty SEmismooth) is a C++ solver for complementarity-constrained quadratic programming (CCQP), based on a D-gap penalty reformulation and a semismooth Newton-type method.
 
 The solver provides Python and MATLAB interfaces and is designed for efficient solution of structured CCQPs.
 
@@ -85,7 +85,18 @@ Minimal examples are provided for all supported interfaces:
 
 - [gapese-mujoco](https://github.com/KY-Lin22/gapese-mujoco) — a robotics application of Gapese using MuJoCo.
 
+![Gapese MuJoCo robotics application](docs/gapese_mujoco.gif)
+
+## Benchmark
+
+Gapese is evaluated on a fixed 39-problem MacMPEC-derived CCQP benchmark against Marble, LCQPow, Gurobi, and CCOpt. See [gapese-benchmark](https://github.com/KY-Lin22/gapese-benchmark) for the benchmark protocol, solver configurations, and reproducible results.
+
+![Runtime performance profile for the five-solver benchmark](docs/runtime_performance_profile.png)
+
 ## Documentation
+
+- **K. Lin** and T. Ohtsuka, "[A Gap Penalty Method for Optimal Control of Linear Complementarity Systems](https://doi.org/10.1109/CDC56724.2024.10885989)," *Proceedings of the 63rd IEEE Conference on Decision and Control (CDC)*, pp. 880–887, Dec. 2024.
+- **K. Lin** and T. Ohtsuka, "[A Gap Penalty Reformulation for Mathematical Programming With Complementarity Constraints: Convergence Analysis](https://doi.org/10.1109/LCSYS.2025.3579405)," *IEEE Control Systems Letters*, Vol. 9, pp. 925–930, Jun. 2025.
 
 Detailed algorithm and interface documentation will be added under `docs/`.
 
